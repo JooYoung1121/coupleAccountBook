@@ -7,8 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		CE876C9A2F5E8F98005BE379 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = CE876C992F5E8F98005BE379 /* FirebaseAuth */; };
-		CE876C9C2F5E8F98005BE379 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = CE876C9B2F5E8F98005BE379 /* FirebaseFirestore */; };
+		CE876CA32F5EBE8F005BE379 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = CE876CA22F5EBE8F005BE379 /* FirebaseAuth */; };
+		CE876CA52F5EBE8F005BE379 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = CE876CA42F5EBE8F005BE379 /* FirebaseFirestore */; };
+		CE876CA72F5EBE8F005BE379 /* FirebaseFunctions in Frameworks */ = {isa = PBXBuildFile; productRef = CE876CA62F5EBE8F005BE379 /* FirebaseFunctions */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,8 +29,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				CE876C9A2F5E8F98005BE379 /* FirebaseAuth in Frameworks */,
-				CE876C9C2F5E8F98005BE379 /* FirebaseFirestore in Frameworks */,
+				CE876CA72F5EBE8F005BE379 /* FirebaseFunctions in Frameworks */,
+				CE876CA32F5EBE8F005BE379 /* FirebaseAuth in Frameworks */,
+				CE876CA52F5EBE8F005BE379 /* FirebaseFirestore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -72,8 +74,9 @@
 			);
 			name = coupleAccountBank;
 			packageProductDependencies = (
-				CE876C992F5E8F98005BE379 /* FirebaseAuth */,
-				CE876C9B2F5E8F98005BE379 /* FirebaseFirestore */,
+				CE876CA22F5EBE8F005BE379 /* FirebaseAuth */,
+				CE876CA42F5EBE8F005BE379 /* FirebaseFirestore */,
+				CE876CA62F5EBE8F005BE379 /* FirebaseFunctions */,
 			);
 			productName = coupleAccountBank;
 			productReference = CE876B7E2F5E6632005BE379 /* coupleAccountBank.app */;
@@ -104,7 +107,7 @@
 			mainGroup = CE876B752F5E6632005BE379;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				CE876C982F5E8F98005BE379 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				CE876CA12F5EBE8F005BE379 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CE876B7F2F5E6632005BE379 /* Products */;
@@ -344,7 +347,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		CE876C982F5E8F98005BE379 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+		CE876CA12F5EBE8F005BE379 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
 			requirement = {
@@ -355,15 +358,20 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		CE876C992F5E8F98005BE379 /* FirebaseAuth */ = {
+		CE876CA22F5EBE8F005BE379 /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = CE876C982F5E8F98005BE379 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			package = CE876CA12F5EBE8F005BE379 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseAuth;
 		};
-		CE876C9B2F5E8F98005BE379 /* FirebaseFirestore */ = {
+		CE876CA42F5EBE8F005BE379 /* FirebaseFirestore */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = CE876C982F5E8F98005BE379 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			package = CE876CA12F5EBE8F005BE379 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
 			productName = FirebaseFirestore;
+		};
+		CE876CA62F5EBE8F005BE379 /* FirebaseFunctions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CE876CA12F5EBE8F005BE379 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFunctions;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -38,3 +38,7 @@ GoogleService-Info.plist
 # Claude Code / OMC
 .omc/
 CLAUDE.md
+
+# Node.js
+node_modules/
+functions/node_modules/
