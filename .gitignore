@@ -34,3 +34,7 @@ fastlane/test_output
 
 # Firebase
 GoogleService-Info.plist
+
+# Claude Code / OMC
+.omc/
+CLAUDE.md
