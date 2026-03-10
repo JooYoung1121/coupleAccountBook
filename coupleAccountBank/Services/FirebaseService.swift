@@ -29,7 +29,7 @@ struct GoalDTO: Codable {
 
 final class FirebaseService {
     static let shared = FirebaseService()
-    private let db = Firestore.firestore()
+    private let db = Firestore.firestore(database: "coupleaccountbankdb")
 
     private init() {}
 
@@ -59,6 +59,7 @@ final class FirebaseService {
         }
         var user = User(id: id, name: name, email: email)
         user.coupleID = data["coupleID"] as? String
+        user.connectedId = data["connectedId"] as? String
         user.profileImageURL = data["profileImageURL"] as? String
         return user
     }
@@ -87,6 +88,12 @@ final class FirebaseService {
 
     func deleteTransaction(id: String, coupleID: String) async throws {
         try await coupleTransactions(coupleID).document(id).delete()
+    }
+
+    /// 해당 커플 방의 모든 거래 document ID를 가져옵니다 (중복 정리용)
+    func fetchTransactionIds(coupleID: String) async throws -> [String] {
+        let snapshot = try await coupleTransactions(coupleID).getDocuments()
+        return snapshot.documents.map(\.documentID)
     }
 
     func listenToTransactions(

@@ -45,7 +45,7 @@ final class CODEFService {
         let data: [String: Any] = [
             "organization": organization,
             "businessType": businessType,
-            "loginType": "0",
+            "loginType": "1",  // 1: 아이디/비밀번호, 0: 인증서(derFile 필수)
             "id": id,
             "password": password
         ]
@@ -87,25 +87,70 @@ final class CODEFService {
 
     func fetchBankTransactions(
         organization: String,
-        accountNumber: String,
+        account: String,
         startDate: String,
-        endDate: String
+        endDate: String,
+        accountPassword: String = "",
+        birthDate: String = "",
+        inquiryType: String = "1",
+        connectedIdOverride: String? = nil
     ) async throws -> [[String: Any]] {
-        let data: [String: Any] = [
+        var data: [String: Any] = [
             "organization": organization,
-            "accountNumber": accountNumber,
+            "account": account,
             "startDate": startDate,
-            "endDate": endDate
+            "endDate": endDate,
+            "accountPassword": accountPassword,
+            "birthDate": birthDate,
+            "inquiryType": inquiryType,
         ]
+        if let override = connectedIdOverride {
+            data["connectedIdOverride"] = override
+        }
         let result = try await functions
             .httpsCallable("fetchBankTransactions")
             .call(data)
 
-        guard let dict = result.data as? [String: Any],
-              let list = dict["data"] as? [[String: Any]] else {
+        // CODEF 응답: { result, data } 이며 data는 계좌 객체 { resAccount, resTrHistoryList: [...] }
+        guard let dict = result.data as? [String: Any] else { return [] }
+        guard let data = dict["data"] as? [String: Any],
+              let list = data["resTrHistoryList"] as? [[String: Any]] else {
+            // 일부 API는 data가 곧 배열인 경우 대비
+            if let directList = dict["data"] as? [[String: Any]] { return directList }
             return []
         }
         return list
+    }
+
+    // MARK: - 은행 입출금 내역 조회 (원본 응답 — 개발용)
+
+    func fetchBankTransactionsRaw(
+        organization: String,
+        account: String,
+        startDate: String,
+        endDate: String,
+        accountPassword: String = "",
+        birthDate: String = "",
+        inquiryType: String = "1",
+        connectedIdOverride: String? = nil
+    ) async throws -> [String: Any] {
+        var data: [String: Any] = [
+            "organization": organization,
+            "account": account,
+            "startDate": startDate,
+            "endDate": endDate,
+            "accountPassword": accountPassword,
+            "birthDate": birthDate,
+            "inquiryType": inquiryType,
+        ]
+        if let override = connectedIdOverride {
+            data["connectedIdOverride"] = override
+        }
+        let result = try await functions
+            .httpsCallable("fetchBankTransactions")
+            .call(data)
+
+        return result.data as? [String: Any] ?? [:]
     }
 
     // MARK: - 날짜 포맷 헬퍼

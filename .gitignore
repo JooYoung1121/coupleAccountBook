@@ -42,3 +42,5 @@ CLAUDE.md
 # Node.js
 node_modules/
 functions/node_modules/
+functions/.env
+functions/.env.*

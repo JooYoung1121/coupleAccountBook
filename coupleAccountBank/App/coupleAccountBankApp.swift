@@ -1,19 +1,16 @@
 import SwiftUI
 import SwiftData
-import FirebaseCore
 
 @main
 struct coupleAccountBankApp: App {
-    @State private var authService = AuthService()
-
-    init() {
-        FirebaseApp.configure()
-    }
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
     var body: some Scene {
         WindowGroup {
+            // AuthService.shared는 body 평가 시점에 처음 접근 →
+            // AppDelegate.application(_:didFinishLaunchingWithOptions:) 이후 보장
             ContentView()
-                .environment(authService)
+                .environment(AuthService.shared)
         }
         .modelContainer(for: [Transaction.self, Goal.self])
     }

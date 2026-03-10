@@ -8,7 +8,17 @@
 import SwiftUI
 
 struct ContentView: View {
+    @Environment(AuthService.self) private var authService
+
     var body: some View {
+        if authService.isSignedIn {
+            mainTabView
+        } else {
+            AuthView()
+        }
+    }
+
+    private var mainTabView: some View {
         TabView {
             HomeView()
                 .tabItem {

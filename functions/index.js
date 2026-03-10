@@ -1,22 +1,45 @@
 const { setGlobalOptions } = require("firebase-functions");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
+const { defineString } = require("firebase-functions/params");
 const admin = require("firebase-admin");
+const { getFirestore } = require("firebase-admin/firestore");
 const axios = require("axios");
+const crypto = require("crypto");
 
 admin.initializeApp();
 setGlobalOptions({ maxInstances: 10, region: "asia-northeast3" });
 
-// MARK: - Secrets (Google Secret Manager에 저장)
+const db = getFirestore(admin.app(), "coupleaccountbankdb");
+
+// MARK: - Secrets
 const CODEF_CLIENT_ID = defineSecret("CODEF_CLIENT_ID");
 const CODEF_CLIENT_SECRET = defineSecret("CODEF_CLIENT_SECRET");
+const CODEF_PUBLIC_KEY = defineSecret("CODEF_PUBLIC_KEY");
+
+// MARK: - CODEF 환경 전환 (앱 설정 없이 배포 시에만 변경)
+// .env 또는 firebase functions:config:set params.CODEF_MODE=production
+// 값: sandbox | development | production
+const CODEF_MODE = defineString("CODEF_MODE", { default: "sandbox" });
+
+const CODEF_API_BASES = {
+  sandbox: "https://sandbox.codef.io",
+  development: "https://development.codef.io",
+  production: "https://api.codef.io",
+};
+
+function getCodefApiBase() {
+  const mode = (CODEF_MODE.value() || "sandbox").toLowerCase();
+  return CODEF_API_BASES[mode] || CODEF_API_BASES.sandbox;
+}
 
 // MARK: - CODEF 설정
-// 샌드박스 테스트 완료 후 "https://codef.io"로 변경
-const CODEF_API_BASE = "https://sandbox.codef.io";
+// SANDBOX: 아무 ID/PW로 고정 응답 테스트 가능
+// DEMO:    development.codef.io — CODEF 제공 실제 테스트 계정 필요
+// PROD:    api.codef.io — 실제 은행 계정
 const CODEF_TOKEN_URL = "https://oauth.codef.io/oauth/token";
 
-// MARK: - 토큰 발급 (내부 헬퍼)
+// MARK: - 토큰 발급
 async function getCodefToken(clientId, clientSecret) {
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
   const response = await axios.post(
@@ -32,11 +55,20 @@ async function getCodefToken(clientId, clientSecret) {
   return response.data.access_token;
 }
 
+// MARK: - RSA 비밀번호 암호화 (데모버전 필수)
+function encryptPassword(password, publicKeyBase64) {
+  const pem = `-----BEGIN PUBLIC KEY-----\n${publicKeyBase64}\n-----END PUBLIC KEY-----`;
+  const buffer = Buffer.from(password, "utf8");
+  const encrypted = crypto.publicEncrypt(
+    { key: pem, padding: crypto.constants.RSA_PKCS1_PADDING },
+    buffer
+  );
+  return encrypted.toString("base64");
+}
+
 // MARK: - 금융기관 계정 연결 (connectedId 발급)
-// iOS에서 호출: FirebaseFunctions.functions().httpsCallable("createCodefAccount")
-// 요청 데이터: { organization: "0301", loginType: "0", id: "...", password: "..." }
 exports.createCodefAccount = onCall(
-  { secrets: [CODEF_CLIENT_ID, CODEF_CLIENT_SECRET] },
+  { secrets: [CODEF_CLIENT_ID, CODEF_CLIENT_SECRET, CODEF_PUBLIC_KEY], invoker: "public" },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
 
@@ -45,53 +77,80 @@ exports.createCodefAccount = onCall(
       throw new HttpsError("invalid-argument", "organization, id, password가 필요합니다.");
     }
 
-    const token = await getCodefToken(
-      CODEF_CLIENT_ID.value(),
-      CODEF_CLIENT_SECRET.value()
-    );
-
-    const response = await axios.post(
-      `${CODEF_API_BASE}/v1/account/create`,
-      {
-        accountList: [{
-          countryCode: "KR",
-          businessType: businessType ?? "BK",  // BK: 은행, CD: 카드
-          clientType: "P",                      // P: 개인
-          organization,
-          loginType: loginType ?? "0",          // 0: ID/PW, 1: 인증서
-          id,
-          password,
-        }],
-      },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-
-    const connectedId = response.data.data?.connectedId;
-    if (!connectedId) {
-      throw new HttpsError("internal", `계정 연결 실패: ${JSON.stringify(response.data)}`);
+    // 비밀번호 RSA 암호화
+    let encryptedPassword;
+    try {
+      const pubKey = CODEF_PUBLIC_KEY.value();
+      console.log("공개키 길이:", pubKey.length, "앞10자:", pubKey.slice(0, 10));
+      encryptedPassword = encryptPassword(password, pubKey);
+      console.log("암호화 성공, 결과 길이:", encryptedPassword.length);
+    } catch (err) {
+      console.error("RSA 암호화 실패:", err.message);
+      throw new HttpsError("internal", `RSA 암호화 실패: ${err.message}`);
     }
 
-    // Firestore users/{uid}에 connectedId 저장
-    await admin.firestore()
-      .collection("users")
-      .doc(request.auth.uid)
-      .set({ connectedId }, { merge: true });
+    let token;
+    try {
+      token = await getCodefToken(CODEF_CLIENT_ID.value(), CODEF_CLIENT_SECRET.value());
+    } catch (err) {
+      console.error("토큰 발급 실패:", err.message);
+      throw new HttpsError("internal", `토큰 발급 실패: ${err.message}`);
+    }
+
+    let decoded;
+    try {
+      const apiBase = getCodefApiBase();
+      const response = await axios.post(
+        `${apiBase}/v1/account/create`,
+        {
+          accountList: [{
+            countryCode: "KR",
+            businessType: businessType ?? "BK",
+            clientType: "P",
+            organization,
+            loginType: loginType ?? "1",  // "1": ID/PW, "0": 인증서(derFile 필수)
+            id,
+            password: encryptedPassword,
+          }],
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const raw = response.data;
+      decoded = typeof raw === "string" ? JSON.parse(decodeURIComponent(raw)) : raw;
+      console.log("createCodefAccount CODEF response:", JSON.stringify(decoded));
+    } catch (err) {
+      if (err.response) {
+        throw new HttpsError("internal", JSON.stringify(err.response.data));
+      }
+      throw new HttpsError("internal", err.message);
+    }
+
+    const connectedId = decoded?.data?.connectedId;
+    if (!connectedId) {
+      throw new HttpsError("internal", `계정 연결 실패: ${JSON.stringify(decoded)}`);
+    }
+
+    if (request.auth) {
+      await db
+        .collection("users")
+        .doc(request.auth.uid)
+        .set({ connectedId }, { merge: true });
+    }
 
     return { connectedId };
   }
 );
 
 // MARK: - 카드 승인내역 조회
-// 요청 데이터: { organization: "0301", startDate: "20250101", endDate: "20250228" }
 exports.fetchCardTransactions = onCall(
-  { secrets: [CODEF_CLIENT_ID, CODEF_CLIENT_SECRET] },
+  { secrets: [CODEF_CLIENT_ID, CODEF_CLIENT_SECRET], invoker: "public" },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
 
     const { organization, startDate, endDate } = request.data;
     const uid = request.auth.uid;
 
-    const userDoc = await admin.firestore().collection("users").doc(uid).get();
+    const userDoc = await db.collection("users").doc(uid).get();
     const connectedId = userDoc.data()?.connectedId;
     if (!connectedId) throw new HttpsError("failed-precondition", "금융기관 계정 연결이 필요합니다.");
 
@@ -100,28 +159,52 @@ exports.fetchCardTransactions = onCall(
       CODEF_CLIENT_SECRET.value()
     );
 
-    const response = await axios.post(
-      `${CODEF_API_BASE}/v1/kr/card/p/account/approval-list`,
-      { connectedId, organization, startDate, endDate },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-
-    return response.data;
+    try {
+      const apiBase = getCodefApiBase();
+      const response = await axios.post(
+        `${apiBase}/v1/kr/card/p/account/approval-list`,
+        { connectedId, organization, startDate, endDate },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const raw = response.data;
+      const decoded = typeof raw === "string"
+        ? JSON.parse(decodeURIComponent(raw))
+        : raw;
+      return decoded;
+    } catch (err) {
+      if (err.response) {
+        throw new HttpsError("internal", JSON.stringify(err.response.data));
+      }
+      throw new HttpsError("internal", err.message);
+    }
   }
 );
 
 // MARK: - 은행 입출금 내역 조회
-// 요청 데이터: { organization: "0004", accountNumber: "...", startDate: "20250101", endDate: "20250228" }
 exports.fetchBankTransactions = onCall(
-  { secrets: [CODEF_CLIENT_ID, CODEF_CLIENT_SECRET] },
+  { secrets: [CODEF_CLIENT_ID, CODEF_CLIENT_SECRET, CODEF_PUBLIC_KEY], invoker: "public" },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    console.log("fetchBankTransactions called, auth:", request.auth.uid);
 
-    const { organization, accountNumber, startDate, endDate } = request.data;
+    const {
+      organization,
+      account,
+      startDate,
+      endDate,
+      accountPassword = "",
+      birthDate = "",
+      inquiryType = "1",
+      connectedIdOverride,   // 테스트용 수동 connectedId
+    } = request.data;
     const uid = request.auth.uid;
 
-    const userDoc = await admin.firestore().collection("users").doc(uid).get();
-    const connectedId = userDoc.data()?.connectedId;
+    // connectedId: 수동 입력 우선, 없으면 Firestore에서 조회
+    let connectedId = connectedIdOverride;
+    if (!connectedId) {
+      const userDoc = await db.collection("users").doc(uid).get();
+      connectedId = userDoc.data()?.connectedId;
+    }
     if (!connectedId) throw new HttpsError("failed-precondition", "금융기관 계정 연결이 필요합니다.");
 
     const token = await getCodefToken(
@@ -129,12 +212,45 @@ exports.fetchBankTransactions = onCall(
       CODEF_CLIENT_SECRET.value()
     );
 
-    const response = await axios.post(
-      `${CODEF_API_BASE}/v1/kr/bank/p/account/transaction-list`,
-      { connectedId, organization, accountNumber, startDate, endDate, orderBy: "0" },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
+    // 계좌 비밀번호 RSA 암호화 (있을 경우)
+    const encryptedAccountPassword = accountPassword
+      ? encryptPassword(accountPassword, CODEF_PUBLIC_KEY.value())
+      : "";
 
-    return response.data;
+    try {
+      const apiBase = getCodefApiBase();
+      const response = await axios.post(
+        `${apiBase}/v1/kr/bank/p/account/transaction-list`,
+        {
+          connectedId,
+          organization,
+          account,
+          startDate,
+          endDate,
+          orderBy: "0",
+          inquiryType,
+          accountPassword: encryptedAccountPassword,
+          birthDate,
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      console.log("CODEF status:", response.status);
+      // CODEF 개발 API는 URL-encoded 문자열로 응답함 → JSON으로 디코딩
+      const raw = response.data;
+      const decoded = typeof raw === "string"
+        ? JSON.parse(decodeURIComponent(raw))
+        : raw;
+      console.log("CODEF decoded result code:", decoded?.result?.code);
+      if (!decoded) {
+        throw new HttpsError("internal", "CODEF가 빈 응답을 반환했습니다.");
+      }
+      return decoded;
+    } catch (err) {
+      if (err.response) {
+        console.error("CODEF error response:", JSON.stringify(err.response.data));
+        throw new HttpsError("internal", JSON.stringify(err.response.data));
+      }
+      throw new HttpsError("internal", err.message);
+    }
   }
 );
