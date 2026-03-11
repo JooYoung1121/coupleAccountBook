@@ -147,32 +147,48 @@ exports.fetchCardTransactions = onCall(
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
 
-    const { organization, startDate, endDate } = request.data;
+    const { organization, startDate, endDate, connectedIdOverride } = request.data;
     const uid = request.auth.uid;
+    console.log("fetchCardTransactions called:", { uid, organization, startDate, endDate, connectedIdOverride });
 
-    const userDoc = await db.collection("users").doc(uid).get();
-    const connectedId = userDoc.data()?.connectedId;
+    let connectedId = connectedIdOverride;
+    if (!connectedId) {
+      const userDoc = await db.collection("users").doc(uid).get();
+      connectedId = userDoc.data()?.connectedId;
+      console.log("fetchCardTransactions connectedId from DB:", connectedId);
+    }
     if (!connectedId) throw new HttpsError("failed-precondition", "금융기관 계정 연결이 필요합니다.");
+
+    console.log("fetchCardTransactions using connectedId:", connectedId);
 
     const token = await getCodefToken(
       CODEF_CLIENT_ID.value(),
       CODEF_CLIENT_SECRET.value()
     );
+    console.log("fetchCardTransactions token obtained, length:", token?.length);
 
     try {
       const apiBase = getCodefApiBase();
+      const requestBody = { connectedId, organization, startDate, endDate, orderBy: "0", inquiryType: "1" };
+      console.log("fetchCardTransactions request:", apiBase, JSON.stringify(requestBody));
       const response = await axios.post(
         `${apiBase}/v1/kr/card/p/account/approval-list`,
-        { connectedId, organization, startDate, endDate },
+        requestBody,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const raw = response.data;
+      console.log("fetchCardTransactions raw response type:", typeof raw);
       const decoded = typeof raw === "string"
         ? JSON.parse(decodeURIComponent(raw))
         : raw;
+      console.log("fetchCardTransactions result code:", decoded?.result?.code, "message:", decoded?.result?.message);
+      console.log("fetchCardTransactions full response:", JSON.stringify(decoded).substring(0, 2000));
       return decoded;
     } catch (err) {
+      console.error("fetchCardTransactions error:", err.message);
       if (err.response) {
+        console.error("Card error status:", err.response.status);
+        console.error("Card error response:", JSON.stringify(err.response.data));
         throw new HttpsError("internal", JSON.stringify(err.response.data));
       }
       throw new HttpsError("internal", err.message);

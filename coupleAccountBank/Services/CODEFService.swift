@@ -65,22 +65,34 @@ final class CODEFService {
     func fetchCardTransactions(
         organization: String,
         startDate: String,
-        endDate: String
+        endDate: String,
+        connectedIdOverride: String? = nil
     ) async throws -> [[String: Any]] {
-        let data: [String: Any] = [
+        var requestData: [String: Any] = [
             "organization": organization,
             "startDate": startDate,
             "endDate": endDate
         ]
+        if let override = connectedIdOverride {
+            requestData["connectedIdOverride"] = override
+        }
         let result = try await functions
             .httpsCallable("fetchCardTransactions")
-            .call(data)
+            .call(requestData)
 
-        guard let dict = result.data as? [String: Any],
-              let list = dict["data"] as? [[String: Any]] else {
-            return []
+        // CODEF 응답: { result, data } — data는 객체, 배열, 또는 내부에 리스트를 포함
+        guard let dict = result.data as? [String: Any] else { return [] }
+
+        if let dataObj = dict["data"] as? [String: Any] {
+            // data 내부에 배열 키가 있는 경우
+            if let list = dataObj["resList"] as? [[String: Any]] { return list }
+            if let list = dataObj["resApprovalList"] as? [[String: Any]] { return list }
+            // data가 단일 거래 객체인 경우 (샌드박스 등)
+            if dataObj["resUsedDate"] != nil { return [dataObj] }
         }
-        return list
+        // data가 곧 배열인 경우
+        if let list = dict["data"] as? [[String: Any]] { return list }
+        return []
     }
 
     // MARK: - 은행 입출금 내역 조회
@@ -149,6 +161,29 @@ final class CODEFService {
         let result = try await functions
             .httpsCallable("fetchBankTransactions")
             .call(data)
+
+        return result.data as? [String: Any] ?? [:]
+    }
+
+    // MARK: - 카드 승인내역 조회 (원본 응답 — 개발용)
+
+    func fetchCardTransactionsRaw(
+        organization: String,
+        startDate: String,
+        endDate: String,
+        connectedIdOverride: String? = nil
+    ) async throws -> [String: Any] {
+        var requestData: [String: Any] = [
+            "organization": organization,
+            "startDate": startDate,
+            "endDate": endDate
+        ]
+        if let override = connectedIdOverride {
+            requestData["connectedIdOverride"] = override
+        }
+        let result = try await functions
+            .httpsCallable("fetchCardTransactions")
+            .call(requestData)
 
         return result.data as? [String: Any] ?? [:]
     }

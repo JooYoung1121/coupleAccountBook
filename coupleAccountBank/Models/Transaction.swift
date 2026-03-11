@@ -42,9 +42,15 @@ final class Transaction {
     var date: Date
     /// Firebase UID of the member who recorded this transaction
     var ownerID: String
+    /// 거래를 기록한 사용자 이름 (커플 공유 시 구분용)
+    var ownerName: String
     /// Shared couple room ID (used as Firestore document path prefix)
     var coupleID: String
     var isSynced: Bool
+    /// CODEF 등 외부에서 가져온 거래 여부 (true이면 금액/날짜 수정 불가)
+    var isImported: Bool
+    /// 사용자가 추가로 남기는 메모 (가져온 거래에도 자유롭게 작성 가능)
+    var userMemo: String
 
     init(
         id: String = UUID().uuidString,
@@ -54,8 +60,11 @@ final class Transaction {
         note: String = "",
         date: Date = .now,
         ownerID: String,
+        ownerName: String = "",
         coupleID: String,
-        isSynced: Bool = false
+        isSynced: Bool = false,
+        isImported: Bool = false,
+        userMemo: String = ""
     ) {
         self.id = id
         self.amount = amount
@@ -64,7 +73,10 @@ final class Transaction {
         self.note = note
         self.date = date
         self.ownerID = ownerID
+        self.ownerName = ownerName
         self.coupleID = coupleID
         self.isSynced = isSynced
+        self.isImported = isImported
+        self.userMemo = userMemo
     }
 }

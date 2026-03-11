@@ -21,6 +21,12 @@ struct CODEFTestView: View {
     @State private var birthDate = ""
     @State private var inquiryType = "1"
 
+    // MARK: - 카드 승인내역
+    @State private var cardOrg = "0309"
+    @State private var cardConnectedId = ""
+    @State private var cardStartDate = "20190101"
+    @State private var cardEndDate = "20190630"
+
     // MARK: - 상태
     @State private var isLoading = false
     @State private var responseText = "조회 버튼을 눌러주세요"
@@ -32,6 +38,19 @@ struct CODEFTestView: View {
         ("0081", "하나은행"),
         ("0011", "농협"),
     ]
+
+    let cardCodes = [
+        ("0309", "신한카드"),
+        ("0301", "KB카드"),
+        ("0310", "현대카드"),
+        ("0311", "삼성카드"),
+        ("0313", "롯데카드"),
+    ]
+
+    /// 업종에 따라 기관 목록 반환
+    var createOrgCodes: [(String, String)] {
+        createBizType == "CD" ? cardCodes : bankCodes
+    }
 
     var body: some View {
         Form {
@@ -47,14 +66,17 @@ struct CODEFTestView: View {
             }
 
             Section {
-                Picker("기관", selection: $createOrg) {
-                    ForEach(bankCodes, id: \.0) { code, name in
-                        Text("\(name) (\(code))").tag(code)
-                    }
-                }
                 Picker("업종", selection: $createBizType) {
                     Text("은행 (BK)").tag("BK")
                     Text("카드 (CD)").tag("CD")
+                }
+                .onChange(of: createBizType) { _, newValue in
+                    createOrg = newValue == "CD" ? "0309" : "0020"
+                }
+                Picker("기관", selection: $createOrg) {
+                    ForEach(createOrgCodes, id: \.0) { code, name in
+                        Text("\(name) (\(code))").tag(code)
+                    }
                 }
                 TextField("인터넷뱅킹 ID", text: $createId)
                     .autocorrectionDisabled()
@@ -112,6 +134,27 @@ struct CODEFTestView: View {
                 .disabled(connectedId.isEmpty || isLoading)
             }
 
+            Section("③ 카드 승인내역 조회") {
+                Picker("카드사", selection: $cardOrg) {
+                    ForEach(cardCodes, id: \.0) { code, name in
+                        Text("\(name) (\(code))").tag(code)
+                    }
+                }
+                TextField("connectedId (카드용)", text: $cardConnectedId)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .font(.caption.monospaced())
+                HStack {
+                    TextField("시작일 (yyyyMMdd)", text: $cardStartDate).keyboardType(.numberPad)
+                    Text("~")
+                    TextField("종료일", text: $cardEndDate).keyboardType(.numberPad)
+                }
+                Button("카드 승인내역 조회") {
+                    Task { await fetchCard() }
+                }
+                .disabled(cardConnectedId.isEmpty || isLoading)
+            }
+
             Section("API 응답") {
                 if isLoading {
                     ProgressView("요청 중...")
@@ -143,9 +186,14 @@ struct CODEFTestView: View {
                 id: createId,
                 password: createPassword
             )
-            connectedId = cid
-            organization = createOrg
-            responseText = "✅ connectedId 발급 완료:\n\(cid)"
+            if createBizType == "CD" {
+                cardConnectedId = cid
+                cardOrg = createOrg
+            } else {
+                connectedId = cid
+                organization = createOrg
+            }
+            responseText = "✅ connectedId 발급 완료 (\(createBizType)):\n\(cid)"
             print("[CODEF] connectedId 발급 완료: \(cid)")
         } catch {
             print("[CODEF] 발급 오류: \(error)")
@@ -191,6 +239,30 @@ struct CODEFTestView: View {
         } catch {
             print("[CODEF] 오류: \(error)")
             responseText = "❌ 오류:\n\(error)"
+        }
+    }
+    private func fetchCard() async {
+        isLoading = true
+        defer { isLoading = false }
+
+        let uid = Auth.auth().currentUser?.uid
+        print("[CODEF] Auth UID: \(uid ?? "nil")")
+        print("[CODEF] 카드 조회 요청: org=\(cardOrg), \(cardStartDate)~\(cardEndDate), connectedId=\(cardConnectedId)")
+
+        do {
+            let raw = try await CODEFService.shared.fetchCardTransactionsRaw(
+                organization: cardOrg,
+                startDate: cardStartDate,
+                endDate: cardEndDate,
+                connectedIdOverride: cardConnectedId
+            )
+            let json = try JSONSerialization.data(withJSONObject: raw, options: .prettyPrinted)
+            let text = String(data: json, encoding: .utf8) ?? "파싱 실패"
+            responseText = text
+            print("[CODEF] 카드 응답:\n\(text)")
+        } catch {
+            print("[CODEF] 카드 오류: \(error)")
+            responseText = "❌ 카드 조회 오류:\n\(error)"
         }
     }
 }

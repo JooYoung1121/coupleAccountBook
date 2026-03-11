@@ -62,7 +62,7 @@ struct CODEFBankTransaction: Decodable {
         return "bank_\(hex)"
     }
 
-    func toTransaction(ownerID: String, coupleID: String, accountNumber: String) -> Transaction {
+    func toTransaction(ownerID: String, ownerName: String = "", coupleID: String, accountNumber: String) -> Transaction {
         Transaction(
             id: stableId(account: accountNumber),
             amount: amount,
@@ -71,8 +71,10 @@ struct CODEFBankTransaction: Decodable {
             note: description,
             date: date,
             ownerID: ownerID,
+            ownerName: ownerName,
             coupleID: coupleID,
-            isSynced: true
+            isSynced: true,
+            isImported: true
         )
     }
 
@@ -85,6 +87,72 @@ struct CODEFBankTransaction: Decodable {
         if text.contains("병원") || text.contains("약") || text.contains("의료") { return .health }
         if text.contains("학") || text.contains("교육") { return .education }
         return .other
+    }
+}
+
+// MARK: - 카드 승인내역 항목
+
+struct CODEFCardApproval: Decodable {
+    let resApprovalNo: String?         // 승인번호
+    let resUsedDate: String            // 이용일 "20190601"
+    let resUsedTime: String?           // 이용시간 "120000"
+    let resMemberStoreName: String?    // 가맹점명
+    let resUsedAmount: String          // 이용금액
+    let resMemberStoreType: String?    // 업종
+
+    var amount: Double { Double(resUsedAmount) ?? 0 }
+
+    var storeName: String {
+        resMemberStoreName?.isEmpty == false ? resMemberStoreName! : "카드 결제"
+    }
+
+    var date: Date {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd"
+        return formatter.date(from: resUsedDate) ?? .now
+    }
+
+    func stableId(cardOrg: String) -> String {
+        let raw = "\(cardOrg)_\(resUsedDate)_\(resUsedTime ?? "")_\(resUsedAmount)_\(resApprovalNo ?? "")_\(storeName)"
+        let data = Data(raw.utf8)
+        let hash = SHA256.hash(data: data)
+        let hex = hash.prefix(16).map { String(format: "%02x", $0) }.joined()
+        return "card_\(hex)"
+    }
+
+    func toTransaction(ownerID: String, ownerName: String = "", coupleID: String, cardOrg: String) -> Transaction {
+        Transaction(
+            id: stableId(cardOrg: cardOrg),
+            amount: amount,
+            type: .expense,
+            category: inferCategory(),
+            note: storeName,
+            date: date,
+            ownerID: ownerID,
+            ownerName: ownerName,
+            coupleID: coupleID,
+            isSynced: true,
+            isImported: true
+        )
+    }
+
+    private func inferCategory() -> TransactionCategory {
+        let text = storeName.lowercased()
+        let type = (resMemberStoreType ?? "").lowercased()
+        if text.contains("편의") || text.contains("마트") || text.contains("식") || type.contains("음식") { return .food }
+        if text.contains("주유") || text.contains("교통") || text.contains("택시") || type.contains("교통") { return .transport }
+        if text.contains("병원") || text.contains("약국") || type.contains("의료") { return .health }
+        if text.contains("학원") || text.contains("교육") { return .education }
+        if text.contains("쇼핑") || text.contains("백화") || type.contains("의류") { return .shopping }
+        return .other
+    }
+
+    static func from(dict: [String: Any]) -> CODEFCardApproval? {
+        guard let data = try? JSONSerialization.data(withJSONObject: dict),
+              let decoded = try? JSONDecoder().decode(CODEFCardApproval.self, from: data) else {
+            return nil
+        }
+        return decoded
     }
 }
 

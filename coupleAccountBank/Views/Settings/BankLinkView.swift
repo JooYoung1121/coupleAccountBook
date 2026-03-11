@@ -1,9 +1,13 @@
 import SwiftUI
 import FirebaseAuth
 
-/// 은행 연동 및 입출금 내역 가져오기 화면
+/// 은행·카드 연동 및 내역 가져오기 화면
 struct BankLinkView: View {
     @Environment(AuthService.self) private var authService
+
+    // 등록된 계좌/카드 목록
+    @State private var linkedAccounts: [LinkedAccount] = []
+    @State private var selectedAccount: LinkedAccount?
 
     // 계정 연결 (샌드박스 기본값)
     @State private var createOrg = "0020"
@@ -11,24 +15,30 @@ struct BankLinkView: View {
     @State private var createId = "testuser01"
     @State private var createPassword = "test1234"
 
-    // 내역 가져오기 (샌드박스 기본값)
-    @State private var organization = "0020"
+    // 은행 내역 가져오기 (샌드박스 기본값)
+    @State private var bankOrg = "0020"
     @State private var account = "1002440000000"
-    @State private var startDate = ""
-    @State private var endDate = ""
+    @State private var bankStart = ""
+    @State private var bankEnd = ""
     @State private var accountPassword = ""
-    @State private var birthDate = ""
+
+    // 카드 내역 가져오기 (샌드박스 기본값)
+    @State private var cardOrg = "0309"
+    @State private var cardStart = ""
+    @State private var cardEnd = ""
 
     @State private var isLoading = false
-    @State private var message = "은행 계정을 연결한 뒤, 조회 기간을 선택하고 내역을 가져오세요."
+    @State private var message = "계정을 연결한 뒤, 내역을 가져오세요."
     @State private var messageType: MessageType = .info
 
     private var connectedId: String {
-        authService.currentUser?.connectedId ?? ""
+        selectedAccount?.connectedId ?? authService.currentUser?.connectedId ?? ""
     }
-
     private var effectiveCoupleID: String? {
         authService.currentUser?.effectiveCoupleID
+    }
+    private var currentUserName: String {
+        authService.currentUser?.name ?? "사용자"
     }
 
     let bankCodes: [(String, String)] = [
@@ -38,156 +48,308 @@ struct BankLinkView: View {
         ("0081", "하나은행"),
         ("0011", "농협"),
     ]
+    let cardCodes: [(String, String)] = [
+        ("0309", "신한카드"),
+        ("0301", "KB카드"),
+        ("0310", "현대카드"),
+        ("0311", "삼성카드"),
+        ("0313", "롯데카드"),
+    ]
 
-    enum MessageType {
-        case info
-        case success
-        case error
-    }
+    enum MessageType { case info, success, error }
 
     var body: some View {
         List {
-            // 상태 요약
-            Section {
-                HStack(spacing: 12) {
-                    Image(systemName: connectedId.isEmpty ? "link.badge.plus" : "checkmark.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(connectedId.isEmpty ? .orange : .green)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(connectedId.isEmpty ? "은행 미연동" : "은행 연동됨")
-                            .font(.subheadline.weight(.medium))
-                        if !connectedId.isEmpty {
-                            Text("내역 가져오기를 사용할 수 있어요")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    Spacer()
-                }
-                .padding(.vertical, 4)
-            } header: {
-                Text("연동 상태")
+            if !linkedAccounts.isEmpty {
+                linkedAccountsSection
             }
-
-            // ① 계정 연결
-            Section {
-                Picker("은행", selection: $createOrg) {
-                    ForEach(bankCodes, id: \.0) { code, name in
-                        Text(name).tag(code)
-                    }
-                }
-                TextField("인터넷뱅킹 ID", text: $createId)
-                    .textContentType(.username)
-                    .autocorrectionDisabled()
-                SecureField("비밀번호", text: $createPassword)
-                    .textContentType(.password)
-                Button {
-                    Task { await createConnectedId() }
-                } label: {
-                    HStack {
-                        Text("계정 연결하기")
-                        Spacer()
-                        if isLoading { ProgressView().scaleEffect(0.8) }
-                    }
-                }
-                .disabled(createId.isEmpty || createPassword.isEmpty || isLoading)
-            } header: {
-                Text("1. 은행 계정 연결")
-            } footer: {
-                Text("연동 후 발급된 ID로 입출금 내역을 가져옵니다.")
-            }
-
-            // ② 내역 가져오기
-            Section {
-                Picker("은행", selection: $organization) {
-                    ForEach(bankCodes, id: \.0) { code, name in
-                        Text(name).tag(code)
-                    }
-                }
-                TextField("계좌번호", text: $account)
-                    .keyboardType(.numberPad)
-                HStack {
-                    TextField("시작일", text: $startDate)
-                        .keyboardType(.numberPad)
-                        .placeholder(when: startDate.isEmpty) { Text("20240101").foregroundStyle(.tertiary) }
-                    Text("~")
-                    TextField("종료일", text: $endDate)
-                        .keyboardType(.numberPad)
-                        .placeholder(when: endDate.isEmpty) { Text("20241231").foregroundStyle(.tertiary) }
-                }
-                TextField("계좌 비밀번호 (선택)", text: $accountPassword)
-                    .keyboardType(.numberPad)
-                Button {
-                    Task { await fetchAndSaveBankTransactions() }
-                } label: {
-                    HStack {
-                        Text("내역 가져와서 저장하기")
-                        Spacer()
-                        if isLoading { ProgressView().scaleEffect(0.8) }
-                    }
-                }
-                .disabled(connectedId.isEmpty || account.isEmpty || startDate.isEmpty || endDate.isEmpty || effectiveCoupleID == nil || isLoading)
-            } header: {
-                Text("2. 입출금 내역 가져오기")
-            } footer: {
-                Text("날짜는 yyyyMMdd 형식(예: 20240101)입니다. 가져온 내역은 '내역' 탭에서 볼 수 있어요.")
-            }
-
-            // 결과 메시지
-            Section {
-                Text(message)
-                    .font(.subheadline)
-                    .foregroundStyle(messageColor)
-                    .textSelection(.enabled)
-            } header: {
-                Text("결과")
-            }
+            statusSection
+            connectSection
+            bankFetchSection
+            cardFetchSection
+            resultSection
         }
-        .navigationTitle("은행 연동")
+        .navigationTitle("금융 연동")
         .onAppear {
             resetFields()
+            Task { await loadLinkedAccounts() }
         }
     }
 
+    // MARK: - Sections
+
+    private var linkedAccountsSection: some View {
+        Section {
+            ForEach(linkedAccounts) { acct in
+                Button {
+                    selectAccount(acct)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: acct.isBank ? "building.columns.fill" : "creditcard.fill")
+                            .foregroundStyle(acct.isBank ? .blue : .purple)
+                            .frame(width: 28)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(acct.displayName)
+                                .font(.body)
+                                .foregroundStyle(.primary)
+                            Text(acct.isBank ? "은행" : "카드")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if selectedAccount?.id == acct.id {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        }
+                    }
+                }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button(role: .destructive) {
+                        Task { await deleteAccount(acct) }
+                    } label: {
+                        Label("삭제", systemImage: "trash")
+                    }
+                }
+            }
+        } header: {
+            Text("등록된 계좌/카드")
+        } footer: {
+            Text("선택하면 해당 계좌/카드로 바로 조회할 수 있어요.")
+        }
+    }
+
+    private var statusSection: some View {
+        Section {
+            HStack(spacing: 12) {
+                Image(systemName: connectedId.isEmpty ? "link.badge.plus" : "checkmark.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(connectedId.isEmpty ? .orange : .green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(connectedId.isEmpty ? "미연동" : "연동됨")
+                        .font(.subheadline.weight(.medium))
+                    if !connectedId.isEmpty {
+                        Text("은행·카드 내역을 가져올 수 있어요")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+            }
+            .padding(.vertical, 4)
+        } header: {
+            Text("연동 상태")
+        }
+    }
+
+    private var connectSection: some View {
+        Section {
+            Picker("기관", selection: $createOrg) {
+                ForEach(bankCodes + cardCodes, id: \.0) { code, name in
+                    Text(name).tag(code)
+                }
+            }
+            Picker("업종", selection: $createBizType) {
+                Text("은행 (BK)").tag("BK")
+                Text("카드 (CD)").tag("CD")
+            }
+            TextField("ID", text: $createId)
+                .textContentType(.username)
+                .autocorrectionDisabled()
+            SecureField("비밀번호", text: $createPassword)
+                .textContentType(.password)
+            if createBizType == "BK" {
+                TextField("계좌번호", text: $account).keyboardType(.numberPad)
+                TextField("계좌 비밀번호 (선택)", text: $accountPassword).keyboardType(.numberPad)
+            }
+            Button {
+                Task { await createConnectedId() }
+            } label: {
+                HStack {
+                    Text("계정 연결하기")
+                    Spacer()
+                    if isLoading { ProgressView().scaleEffect(0.8) }
+                }
+            }
+            .disabled(createId.isEmpty || createPassword.isEmpty || isLoading)
+        } header: {
+            Text("1. 계정 연결")
+        } footer: {
+            Text("은행·카드를 각각 연결해야 합니다. 같은 connectedId에 추가됩니다.")
+        }
+    }
+
+    private var bankFetchSection: some View {
+        Section {
+            Picker("은행", selection: $bankOrg) {
+                ForEach(bankCodes, id: \.0) { code, name in
+                    Text(name).tag(code)
+                }
+            }
+            if selectedAccount == nil || selectedAccount?.isCard == true {
+                TextField("계좌번호", text: $account).keyboardType(.numberPad)
+            }
+            dateRangeRow(start: $bankStart, end: $bankEnd)
+            if selectedAccount?.accountPassword == nil {
+                TextField("계좌 비밀번호 (선택)", text: $accountPassword).keyboardType(.numberPad)
+            }
+            Button {
+                Task { await fetchBank() }
+            } label: {
+                HStack {
+                    Text("은행 내역 가져오기")
+                    Spacer()
+                    if isLoading { ProgressView().scaleEffect(0.8) }
+                }
+            }
+            .disabled(connectedId.isEmpty || account.isEmpty || bankStart.isEmpty || bankEnd.isEmpty || isLoading)
+        } header: {
+            Text("2. 은행 입출금 내역")
+        }
+    }
+
+    private var cardFetchSection: some View {
+        Section {
+            Picker("카드사", selection: $cardOrg) {
+                ForEach(cardCodes, id: \.0) { code, name in
+                    Text(name).tag(code)
+                }
+            }
+            dateRangeRow(start: $cardStart, end: $cardEnd)
+            Button {
+                Task { await fetchCard() }
+            } label: {
+                HStack {
+                    Text("카드 내역 가져오기")
+                    Spacer()
+                    if isLoading { ProgressView().scaleEffect(0.8) }
+                }
+            }
+            .disabled(connectedId.isEmpty || cardStart.isEmpty || cardEnd.isEmpty || isLoading)
+        } header: {
+            Text("3. 카드 승인내역")
+        } footer: {
+            Text("카드사 계정도 1단계에서 업종 'CD'로 연결해야 합니다.")
+        }
+    }
+
+    private var resultSection: some View {
+        Section {
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(messageColor)
+                .textSelection(.enabled)
+        } header: {
+            Text("결과")
+        }
+    }
+
+    private func dateRangeRow(start: Binding<String>, end: Binding<String>) -> some View {
+        HStack {
+            TextField("시작일", text: start)
+                .keyboardType(.numberPad)
+                .placeholder(when: start.wrappedValue.isEmpty) { Text("20240101").foregroundStyle(.tertiary) }
+            Text("~")
+            TextField("종료일", text: end)
+                .keyboardType(.numberPad)
+                .placeholder(when: end.wrappedValue.isEmpty) { Text("20241231").foregroundStyle(.tertiary) }
+        }
+    }
+
+    // MARK: - Helpers
+
     private var messageColor: Color {
         switch messageType {
-        case .info: return .primary
-        case .success: return .green
-        case .error: return .red
+        case .info: .primary
+        case .success: .green
+        case .error: .red
         }
     }
 
     private func resetFields() {
         let (s, e) = defaultDateRange()
-        startDate = s
-        endDate = e
+        bankStart = s; bankEnd = e
+        cardStart = s; cardEnd = e
         accountPassword = ""
-        birthDate = ""
-        message = "은행 계정을 연결한 뒤, 조회 기간을 선택하고 내역을 가져오세요."
+        message = "계정을 연결한 뒤, 내역을 가져오세요."
         messageType = .info
     }
 
     private func defaultDateRange() -> (String, String) {
-        let cal = Calendar.current
         let now = Date()
-        let start = cal.date(byAdding: .month, value: -1, to: now) ?? now
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd"
-        return (formatter.string(from: start), formatter.string(from: now))
+        let start = Calendar.current.date(byAdding: .month, value: -1, to: now) ?? now
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd"
+        return (f.string(from: start), f.string(from: now))
     }
 
+    private func orgName(for code: String) -> String {
+        let all = bankCodes + cardCodes
+        return all.first(where: { $0.0 == code })?.1 ?? code
+    }
+
+    // MARK: - LinkedAccount Management
+
+    private func loadLinkedAccounts() async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        do {
+            linkedAccounts = try await FirebaseService.shared.fetchLinkedAccounts(uid: uid)
+        } catch {
+            // 조용히 실패 — 첫 사용 시 빈 목록
+        }
+    }
+
+    private func selectAccount(_ acct: LinkedAccount) {
+        selectedAccount = acct
+        if acct.isBank {
+            bankOrg = acct.organization
+            if let acc = acct.accountNumber { account = acc }
+            if let pw = acct.accountPassword { accountPassword = pw }
+        } else {
+            cardOrg = acct.organization
+        }
+        message = "\(acct.displayName) 선택됨. 내역을 가져올 수 있어요."
+        messageType = .info
+    }
+
+    private func deleteAccount(_ acct: LinkedAccount) async {
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        do {
+            try await FirebaseService.shared.deleteLinkedAccount(uid: uid, accountId: acct.id)
+            linkedAccounts.removeAll { $0.id == acct.id }
+            if selectedAccount?.id == acct.id { selectedAccount = nil }
+            message = "\(acct.displayName) 삭제됨"
+            messageType = .info
+        } catch {
+            message = "삭제 실패: \(error.localizedDescription)"
+            messageType = .error
+        }
+    }
+
+    // MARK: - Actions
+
     private func createConnectedId() async {
-        isLoading = true
-        defer { isLoading = false }
+        guard let uid = Auth.auth().currentUser?.uid else { return }
+        isLoading = true; defer { isLoading = false }
         do {
             let cid = try await CODEFService.shared.connectAccount(
-                organization: createOrg,
-                businessType: createBizType,
-                id: createId,
-                password: createPassword
+                organization: createOrg, businessType: createBizType,
+                id: createId, password: createPassword
             )
             try await AuthService.shared.loadUserAfterConnect(connectedId: cid)
-            message = "연동이 완료되었습니다. 이제 '내역 가져와서 저장하기'를 사용할 수 있어요."
+
+            // LinkedAccount 자동 저장
+            let linked = LinkedAccount(
+                connectedId: cid,
+                businessType: createBizType,
+                organization: createOrg,
+                organizationName: orgName(for: createOrg),
+                accountNumber: createBizType == "BK" ? (account.isEmpty ? nil : account) : nil,
+                accountPassword: createBizType == "BK" ? (accountPassword.isEmpty ? nil : accountPassword) : nil,
+                loginId: createId
+            )
+            try await FirebaseService.shared.saveLinkedAccount(uid: uid, account: linked)
+            linkedAccounts.insert(linked, at: 0)
+            selectedAccount = linked
+
+            message = "연동 완료! \(linked.displayName)이(가) 등록되었어요."
             messageType = .success
         } catch {
             message = error.localizedDescription
@@ -195,67 +357,67 @@ struct BankLinkView: View {
         }
     }
 
-    private func fetchAndSaveBankTransactions() async {
+    private func fetchBank() async {
         guard let uid = Auth.auth().currentUser?.uid,
               let coupleID = effectiveCoupleID else {
-            message = "로그인 상태와 커플 정보를 확인해 주세요."
-            messageType = .error
-            return
+            message = "로그인 상태를 확인해 주세요."; messageType = .error; return
         }
-        let cid = connectedId
-        if cid.isEmpty {
-            message = "먼저 '계정 연결하기'를 완료해 주세요."
-            messageType = .error
-            return
-        }
+        isLoading = true; defer { isLoading = false }
+        message = "은행 내역을 가져오는 중..."; messageType = .info
 
-        isLoading = true
-        defer { isLoading = false }
-        messageType = .info
-        message = "내역을 가져오는 중..."
+        let effectivePassword = selectedAccount?.accountPassword ?? accountPassword
 
         do {
             let list = try await CODEFService.shared.fetchBankTransactions(
-                organization: organization,
-                account: account,
-                startDate: startDate,
-                endDate: endDate,
-                accountPassword: accountPassword,
-                birthDate: birthDate.isEmpty ? "" : birthDate,
-                connectedIdOverride: cid
+                organization: bankOrg, account: account,
+                startDate: bankStart, endDate: bankEnd,
+                accountPassword: effectivePassword,
+                connectedIdOverride: connectedId
             )
 
-            // stableId 기반으로 저장 (동일 ID → 덮어쓰기 = 중복 없음)
-            var newIds = Set<String>()
+            // 기존 내역 모두 삭제 후 새로 저장 (중복 완전 방지)
+            _ = try await FirebaseService.shared.deleteAllImportedTransactions(coupleID: coupleID)
+
             var saved = 0
             for item in list {
-                guard let codefItem = CODEFBankTransaction.from(dict: item) else { continue }
-                let t = codefItem.toTransaction(ownerID: uid, coupleID: coupleID, accountNumber: account)
-                newIds.insert(t.id)
+                guard let tx = CODEFBankTransaction.from(dict: item) else { continue }
+                let t = tx.toTransaction(ownerID: uid, ownerName: currentUserName, coupleID: coupleID, accountNumber: account)
                 try? await FirebaseService.shared.saveTransaction(t)
                 saved += 1
             }
-
-            // stableId 도입 이전에 UUID로 저장된 구 데이터 정리
-            let existing = try await FirebaseService.shared.fetchTransactionIds(coupleID: coupleID)
-            var cleaned = 0
-            for oldId in existing {
-                if !oldId.hasPrefix("bank_") && !newIds.contains(oldId) {
-                    continue
-                }
-                if !oldId.hasPrefix("bank_") {
-                    try? await FirebaseService.shared.deleteTransaction(id: oldId, coupleID: coupleID)
-                    cleaned += 1
-                }
-            }
-
-            let msg = cleaned > 0
-                ? "\(saved)건 저장, \(cleaned)건 중복 정리 완료."
-                : "\(saved)건의 내역을 저장했습니다."
-            message = "\(msg) '내역' 탭에서 확인하세요."
+            message = "은행 \(saved)건 저장 완료. '내역' 탭에서 확인하세요."
             messageType = .success
         } catch {
-            message = "가져오기 실패: \(error.localizedDescription)"
+            message = "은행 가져오기 실패: \(error.localizedDescription)"
+            messageType = .error
+        }
+    }
+
+    private func fetchCard() async {
+        guard let uid = Auth.auth().currentUser?.uid,
+              let coupleID = effectiveCoupleID else {
+            message = "로그인 상태를 확인해 주세요."; messageType = .error; return
+        }
+        isLoading = true; defer { isLoading = false }
+        message = "카드 내역을 가져오는 중..."; messageType = .info
+
+        do {
+            let list = try await CODEFService.shared.fetchCardTransactions(
+                organization: cardOrg, startDate: cardStart, endDate: cardEnd,
+                connectedIdOverride: connectedId
+            )
+
+            var saved = 0
+            for item in list {
+                guard let approval = CODEFCardApproval.from(dict: item) else { continue }
+                let t = approval.toTransaction(ownerID: uid, ownerName: currentUserName, coupleID: coupleID, cardOrg: cardOrg)
+                try? await FirebaseService.shared.saveTransaction(t)
+                saved += 1
+            }
+            message = "카드 \(saved)건 저장 완료. '내역' 탭에서 확인하세요."
+            messageType = .success
+        } catch {
+            message = "카드 가져오기 실패: \(error.localizedDescription)"
             messageType = .error
         }
     }
