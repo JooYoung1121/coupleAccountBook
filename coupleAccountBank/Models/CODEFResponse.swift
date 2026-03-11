@@ -38,11 +38,15 @@ struct CODEFBankTransaction: Decodable {
         (Double(resAccountIn) ?? 0) > 0 ? .income : .expense
     }
 
+    /// 화면에 보여줄 적요: resAccountDesc3(상대방/가맹점) 우선, 없으면 resAccountDesc2(거래유형)
     var description: String {
-        // desc2가 가장 의미있는 내용 (이자원가, 이체 등)
-        [resAccountDesc2, resAccountDesc1, resAccountDesc3]
-            .compactMap { $0?.isEmpty == false ? $0 : nil }
-            .first ?? "은행 거래"
+        let d3 = resAccountDesc3?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? resAccountDesc3 : nil
+        let d2 = resAccountDesc2?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? resAccountDesc2 : nil
+        let d1 = resAccountDesc1?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ? resAccountDesc1 : nil
+        if let d3 = d3, let d2 = d2, d3 != d2 {
+            return "\(d3) · \(d2)"
+        }
+        return d3 ?? d2 ?? d1 ?? "은행 거래"
     }
 
     var date: Date {

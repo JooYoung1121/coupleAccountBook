@@ -12,6 +12,7 @@ final class AuthService {
     var error: String?
 
     nonisolated(unsafe) private var listenerHandle: AuthStateDidChangeListenerHandle?
+    nonisolated(unsafe) private var stopUserDocListener: (() -> Void)?
 
     init() {
         listenerHandle = Auth.auth().addStateDidChangeListener { [weak self] _, firebaseUser in
@@ -28,6 +29,7 @@ final class AuthService {
         if let handle = listenerHandle {
             Auth.auth().removeStateDidChangeListener(handle)
         }
+        stopUserDocListener?()
     }
 
     var isSignedIn: Bool { currentUser != nil }
@@ -51,6 +53,8 @@ final class AuthService {
     }
 
     func signOut() throws {
+        stopUserDocListener?()
+        stopUserDocListener = nil
         try Auth.auth().signOut()
         currentUser = nil
     }
@@ -99,8 +103,29 @@ final class AuthService {
     private func loadUser(uid: String) async {
         do {
             currentUser = try await FirebaseService.shared.fetchUser(uid: uid)
+            startUserDocListener(uid: uid)
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+
+    /// Firestore 사용자 문서를 실시간 감시하여 파트너 연결 등 변경사항을 즉시 반영합니다.
+    private func startUserDocListener(uid: String) {
+        stopUserDocListener?()
+        stopUserDocListener = FirebaseService.shared.listenToUser(uid: uid) { [weak self] user in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let oldCoupleID = self.currentUser?.coupleID
+                self.currentUser = user
+
+                // coupleID가 새로 설정되면 기존 거래를 새 경로로 마이그레이션
+                if oldCoupleID == nil, let newCoupleID = user.coupleID {
+                    _ = try? await FirebaseService.shared.migrateTransactions(
+                        fromCoupleID: user.id,
+                        toCoupleID: newCoupleID
+                    )
+                }
+            }
         }
     }
 

@@ -40,6 +40,14 @@ struct ContentView: View {
                     Label("설정", systemImage: "gearshape.fill")
                 }
         }
+        .onAppear {
+            let uid = authService.currentUser?.id
+            let coupleID = authService.currentUser?.effectiveCoupleID
+            let userName = authService.currentUser?.name
+            Task {
+                await FinanceSyncService.shared.performLaunchFetchIfNeeded(uid: uid, coupleID: coupleID, userName: userName)
+            }
+        }
     }
 }
 

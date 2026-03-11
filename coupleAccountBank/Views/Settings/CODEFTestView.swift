@@ -21,8 +21,8 @@ struct CODEFTestView: View {
     @State private var birthDate = ""
     @State private var inquiryType = "1"
 
-    // MARK: - 카드 승인내역
-    @State private var cardOrg = "0309"
+    // MARK: - 카드 승인내역 (CODEF 카드사 코드)
+    @State private var cardOrg = "0306"
     @State private var cardConnectedId = ""
     @State private var cardStartDate = "20190101"
     @State private var cardEndDate = "20190630"
@@ -40,11 +40,13 @@ struct CODEFTestView: View {
     ]
 
     let cardCodes = [
-        ("0309", "신한카드"),
+        ("0306", "신한카드"),
+        ("0309", "우리카드"),
+        ("0303", "삼성카드"),
         ("0301", "KB카드"),
-        ("0310", "현대카드"),
-        ("0311", "삼성카드"),
-        ("0313", "롯데카드"),
+        ("0302", "현대카드"),
+        ("0311", "롯데카드"),
+        ("0313", "하나카드"),
     ]
 
     /// 업종에 따라 기관 목록 반환
@@ -71,7 +73,7 @@ struct CODEFTestView: View {
                     Text("카드 (CD)").tag("CD")
                 }
                 .onChange(of: createBizType) { _, newValue in
-                    createOrg = newValue == "CD" ? "0309" : "0020"
+                    createOrg = newValue == "CD" ? "0306" : "0020"
                 }
                 Picker("기관", selection: $createOrg) {
                     ForEach(createOrgCodes, id: \.0) { code, name in

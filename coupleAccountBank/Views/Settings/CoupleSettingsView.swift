@@ -160,10 +160,21 @@ struct CoupleSettingsView: View {
         defer { isLoading = false }
         do {
             try await FirebaseService.shared.joinWithPairingCode(uid: uid, code: inputCode.uppercased())
-            // Reload user to get updated coupleID
             let updatedUser = try await FirebaseService.shared.fetchUser(uid: uid)
+
+            // 기존 거래 내역을 새 coupleID 경로로 마이그레이션
+            var migratedCount = 0
+            if let newCoupleID = updatedUser.coupleID {
+                migratedCount = try await FirebaseService.shared.migrateTransactions(
+                    fromCoupleID: uid,
+                    toCoupleID: newCoupleID
+                )
+            }
+
             authService.currentUser = updatedUser
-            message = "커플 연결 완료!"
+            message = migratedCount > 0
+                ? "커플 연결 완료! (기존 거래 \(migratedCount)건 이전됨)"
+                : "커플 연결 완료!"
             messageIsError = false
             loadPartnerName()
         } catch {

@@ -22,8 +22,8 @@ struct BankLinkView: View {
     @State private var bankEnd = ""
     @State private var accountPassword = ""
 
-    // 카드 내역 가져오기 (샌드박스 기본값)
-    @State private var cardOrg = "0309"
+    // 카드 내역 가져오기 (CODEF 카드사 코드 기준, 기본: 신한카드)
+    @State private var cardOrg = "0306"
     @State private var cardStart = ""
     @State private var cardEnd = ""
 
@@ -42,18 +42,22 @@ struct BankLinkView: View {
     }
 
     let bankCodes: [(String, String)] = [
-        ("0020", "우리은행"),
-        ("0004", "국민은행"),
         ("0088", "신한은행"),
+        ("0090", "카카오뱅크"),
+        ("0004", "국민은행"),
+        ("0020", "우리은행"),
         ("0081", "하나은행"),
         ("0011", "농협"),
     ]
+    // CODEF 카드사 코드: https://developer.codef.io/products/card/overview
     let cardCodes: [(String, String)] = [
-        ("0309", "신한카드"),
+        ("0306", "신한카드"),
+        ("0309", "우리카드"),
+        ("0303", "삼성카드"),
         ("0301", "KB카드"),
-        ("0310", "현대카드"),
-        ("0311", "삼성카드"),
-        ("0313", "롯데카드"),
+        ("0302", "현대카드"),
+        ("0311", "롯데카드"),
+        ("0313", "하나카드"),
     ]
 
     enum MessageType { case info, success, error }
@@ -352,6 +356,10 @@ struct BankLinkView: View {
             message = "연동 완료! \(linked.displayName)이(가) 등록되었어요."
             messageType = .success
         } catch {
+            print("[CODEF] 계정 연결 실패:", error.localizedDescription)
+            if let ns = error as NSError?, !ns.userInfo.isEmpty {
+                print("[CODEF] 에러 상세:", ns.userInfo)
+            }
             message = error.localizedDescription
             messageType = .error
         }

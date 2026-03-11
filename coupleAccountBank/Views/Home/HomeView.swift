@@ -328,7 +328,8 @@ struct HomeView: View {
     private func formatDateKorean(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "ko_KR")
-        formatter.dateFormat = "M월 d일 (EEE)"
+        let isCurrentYear = calendar.component(.year, from: date) == calendar.component(.year, from: Date())
+        formatter.dateFormat = isCurrentYear ? "M월 d일 (EEE)" : "yyyy년 M월 d일 (EEE)"
         return formatter.string(from: date)
     }
 

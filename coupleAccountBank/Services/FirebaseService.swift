@@ -111,17 +111,27 @@ final class FirebaseService {
 
     func listenToTransactions(
         coupleID: String,
+        startDate: Date? = nil,
+        endDate: Date? = nil,
         onChange: @escaping ([TransactionDTO]) -> Void
     ) -> ListenerRegistration {
-        coupleTransactions(coupleID)
+        var query: Query = coupleTransactions(coupleID)
             .order(by: "date", descending: true)
-            .addSnapshotListener { snapshot, _ in
-                guard let docs = snapshot?.documents else { return }
-                let dtos = docs.compactMap { doc -> TransactionDTO? in
-                    try? doc.data(as: TransactionDTO.self)
-                }
-                onChange(dtos)
+
+        if let start = startDate {
+            query = query.whereField("date", isGreaterThanOrEqualTo: Timestamp(date: start))
+        }
+        if let end = endDate {
+            query = query.whereField("date", isLessThanOrEqualTo: Timestamp(date: end))
+        }
+
+        return query.addSnapshotListener { snapshot, _ in
+            guard let docs = snapshot?.documents else { return }
+            let dtos = docs.compactMap { doc -> TransactionDTO? in
+                try? doc.data(as: TransactionDTO.self)
             }
+            onChange(dtos)
+        }
     }
 
     // MARK: - Goal
@@ -289,6 +299,43 @@ final class FirebaseService {
             .document(accountId)
             .delete()
         KeychainService.shared.deleteAccountPassword(accountId: accountId)
+    }
+
+    // MARK: - Migration
+
+    /// 커플 연결 시 기존 거래 내역을 새 coupleID 경로로 이동합니다.
+    func migrateTransactions(fromCoupleID: String, toCoupleID: String) async throws -> Int {
+        guard fromCoupleID != toCoupleID else { return 0 }
+        let snapshot = try await coupleTransactions(fromCoupleID).getDocuments()
+        var migrated = 0
+        for doc in snapshot.documents {
+            var data = doc.data()
+            data["coupleID"] = toCoupleID
+            try await coupleTransactions(toCoupleID).document(doc.documentID).setData(data)
+            try await doc.reference.delete()
+            migrated += 1
+        }
+        return migrated
+    }
+
+    // MARK: - User Listener
+
+    /// 특정 사용자 문서의 실시간 변경을 감시합니다.
+    func listenToUser(uid: String, onChange: @escaping (User) -> Void) -> () -> Void {
+        let registration = db.collection(User.collectionName).document(uid)
+            .addSnapshotListener { snapshot, _ in
+                guard let data = snapshot?.data(),
+                      let id = data["id"] as? String,
+                      let name = data["name"] as? String,
+                      let email = data["email"] as? String else { return }
+                var user = User(id: id, name: name, email: email)
+                user.coupleID = data["coupleID"] as? String
+                user.connectedId = data["connectedId"] as? String
+                user.birthDate = data["birthDate"] as? String
+                user.profileImageURL = data["profileImageURL"] as? String
+                onChange(user)
+            }
+        return { registration.remove() }
     }
 
     // MARK: - Helpers

@@ -11,12 +11,15 @@ enum BankCode: String {
     case nh      = "0011"  // 농협
 }
 
+// CODEF 카드사 코드: https://developer.codef.io/products/card/overview
 enum CardCode: String {
     case kb      = "0301"  // KB카드
-    case shinhan = "0309"  // 신한카드
-    case hyundai = "0310"  // 현대카드
-    case samsung = "0311"  // 삼성카드
-    case lotte   = "0313"  // 롯데카드
+    case hyundai = "0302"  // 현대카드
+    case samsung = "0303"  // 삼성카드
+    case shinhan = "0306"  // 신한카드
+    case woori   = "0309"  // 우리카드
+    case lotte   = "0311"  // 롯데카드
+    case hana    = "0313"  // 하나카드
 }
 
 // MARK: - CODEFService
@@ -53,11 +56,36 @@ final class CODEFService {
             .httpsCallable("createCodefAccount")
             .call(data)
 
+        Self.logFullResponse("createCodefAccount 응답", result.data)
+
         guard let dict = result.data as? [String: Any],
               let connectedId = dict["connectedId"] as? String else {
             throw CODEFError.invalidResponse
         }
         return connectedId
+    }
+
+    /// Xcode 콘솔에 CODEF 풀 응답 출력 (파싱/상세 비교용)
+    private static func logFullResponse(_ label: String, _ value: Any?) {
+        let prefix = "[CODEF]"
+        guard let value = value else { print("\(prefix) \(label): nil"); return }
+        if let dict = value as? [String: Any] {
+            if let jsonData = try? JSONSerialization.data(withJSONObject: dict),
+               let str = String(data: jsonData, encoding: .utf8) {
+                print("\(prefix) \(label):\n\(str)")
+            } else {
+                print("\(prefix) \(label): \(dict)")
+            }
+        } else if let arr = value as? [[String: Any]] {
+            if let jsonData = try? JSONSerialization.data(withJSONObject: arr),
+               let str = String(data: jsonData, encoding: .utf8) {
+                print("\(prefix) \(label) (\(arr.count)건):\n\(str)")
+            } else {
+                print("\(prefix) \(label): \(arr.count)건")
+            }
+        } else {
+            print("\(prefix) \(label): \(type(of: value)) \(value)")
+        }
     }
 
     // MARK: - 카드 승인내역 조회
@@ -79,6 +107,8 @@ final class CODEFService {
         let result = try await functions
             .httpsCallable("fetchCardTransactions")
             .call(requestData)
+
+        Self.logFullResponse("fetchCardTransactions 풀 응답", result.data)
 
         // CODEF 응답: { result, data } — data는 객체, 배열, 또는 내부에 리스트를 포함
         guard let dict = result.data as? [String: Any] else { return [] }
@@ -122,6 +152,8 @@ final class CODEFService {
         let result = try await functions
             .httpsCallable("fetchBankTransactions")
             .call(data)
+
+        Self.logFullResponse("fetchBankTransactions 풀 응답", result.data)
 
         // CODEF 응답: { result, data } 이며 data는 계좌 객체 { resAccount, resTrHistoryList: [...] }
         guard let dict = result.data as? [String: Any] else { return [] }

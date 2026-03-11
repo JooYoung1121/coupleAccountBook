@@ -1,5 +1,41 @@
 # CODEF 연동 및 앱 구조 가이드
 
+## 0. 데모/실제 데이터 테스트 절차 (요약)
+
+실제 금융 데이터로 테스트하려면 아래 순서로 진행하면 됩니다.
+
+1. **CODEF 가입 및 API 키**  
+   [codef.io](https://codef.io)에서 사업자/개인 등록 후 **Client ID**, **Client Secret**, **공개키** 발급
+
+2. **Firebase Secrets 설정**
+   ```bash
+   cd functions
+   firebase functions:secrets:set CODEF_CLIENT_ID
+   firebase functions:secrets:set CODEF_CLIENT_SECRET
+   firebase functions:secrets:set CODEF_PUBLIC_KEY
+   ```
+   (각각 프롬프트에 따라 발급받은 값 입력)
+
+3. **실제 API 모드로 Functions 배포**  
+   `functions/` 디렉터리에 `.env` 파일 생성 후:
+   ```bash
+   echo "CODEF_MODE=production" > .env
+   firebase deploy --only functions
+   ```
+   데모용만 쓰려면 `CODEF_MODE=development`로 설정.
+
+4. **앱에서 연동**  
+   앱 실행 → 로그인 → **설정 → 금융 연동**에서 은행/카드별로 인터넷뱅킹 ID·비밀번호로 "계정 연결하기" 후, "은행 내역 가져오기" / "카드 내역 가져오기"로 기간 선택해 수동 조회.  
+   **앱 실행 시**에는 최근 1개월 구간으로 자동 1회 fetch 되고, 이후에는 수동 가져오기만 사용.
+
+| 모드 | CODEF_MODE | 용도 |
+|------|------------|------|
+| 샌드박스(기본) | `sandbox` | 고정 응답 테스트, 키 없이 동작 |
+| 데모 | `development` | CODEF 데모 계정으로 실제 연동 테스트 |
+| 실제 | `production` | 실제 은행/카드 계정 연동 |
+
+---
+
 ## 1. CODEF 환경 전환 (Sandbox → 데모/실제)
 
 ### 현재 상태
@@ -153,6 +189,12 @@ CODEF_MODE=production
 - **받아오기**: 이미 가능. `CODEFService.fetchCardTransactions` + 기간/카드사 코드.
 - **연결**: `createCodefAccount`에 업종 `CD`, organization에 카드사 코드로 한 번 더 연결.
 - **화면**: 카드 API 응답 구조 확인 후 모델 정의 → “카드 내역” 리스트 화면 또는 “내역” 탭에 카드 섹션 추가.
+
+---
+
+### 4.5 카드사 코드 (CODEF 공식)
+카드 API 및 카드사 코드는 [CODEF 카드 API 개요](https://developer.codef.io/products/card/overview)에서 확인.  
+앱에 반영된 코드 예: 신한카드 0306, 우리카드 0309, 삼성카드 0303, KB카드 0301, 현대카드 0302, 롯데카드 0311, 하나카드 0313.
 
 ---
 

@@ -17,6 +17,15 @@ enum TypeFilter: String, CaseIterable {
     case expense = "지출"
 }
 
+// MARK: - Sort Option
+
+enum SortOption: String, CaseIterable {
+    case dateDesc = "최신순"
+    case dateAsc = "오래된순"
+    case amountDesc = "금액높은순"
+    case amountAsc = "금액낮은순"
+}
+
 struct TransactionListView: View {
     @Environment(AuthService.self) private var authService
     @State private var transactions: [TransactionDTO] = []
@@ -25,6 +34,9 @@ struct TransactionListView: View {
     @State private var typeFilter: TypeFilter = .all
     @State private var showAddSheet = false
     @State private var editingDTO: TransactionDTO?
+    @State private var sortOption: SortOption = .dateDesc
+    @State private var selectedMonth: Date = Date()
+    @State private var showAllMonths = false
 
     private var effectiveCoupleID: String? {
         authService.currentUser?.effectiveCoupleID
@@ -57,22 +69,16 @@ struct TransactionListView: View {
         }
     }
 
-    // MARK: - Monthly Summary (current month, all transactions)
+    // MARK: - Summary (월별 필터링된 데이터 기반)
 
-    private var monthlyIncome: Double {
-        let cal = Calendar.current
-        let now = Date()
-        return transactions
-            .filter { cal.isDate($0.date.dateValue(), equalTo: now, toGranularity: .month) }
+    private var summaryIncome: Double {
+        transactions
             .filter { $0.type == TransactionType.income.rawValue }
             .reduce(0) { $0 + $1.amount }
     }
 
-    private var monthlyExpense: Double {
-        let cal = Calendar.current
-        let now = Date()
-        return transactions
-            .filter { cal.isDate($0.date.dateValue(), equalTo: now, toGranularity: .month) }
+    private var summaryExpense: Double {
+        transactions
             .filter { $0.type == TransactionType.expense.rawValue }
             .reduce(0) { $0 + $1.amount }
     }
@@ -85,6 +91,7 @@ struct TransactionListView: View {
                         emptyView
                     } else {
                         VStack(spacing: 0) {
+                            monthNavigation
                             summaryCard
                             filterBar
                             if filteredTransactions.isEmpty {
@@ -134,11 +141,67 @@ struct TransactionListView: View {
         }
     }
 
+    // MARK: - Month Navigation
+
+    private var monthNavigation: some View {
+        HStack {
+            if !showAllMonths {
+                Button { moveMonth(by: -1) } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.title3.weight(.medium))
+                }
+
+                Spacer()
+
+                Text(monthYearString(selectedMonth))
+                    .font(.title3.weight(.bold))
+
+                Spacer()
+
+                Button { moveMonth(by: 1) } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.title3.weight(.medium))
+                }
+            } else {
+                Text("전체 내역")
+                    .font(.title3.weight(.bold))
+                Spacer()
+            }
+
+            Button {
+                showAllMonths.toggle()
+                startListening()
+            } label: {
+                Text(showAllMonths ? "월별" : "전체")
+                    .font(.caption.weight(.medium))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(.blue.opacity(0.1), in: Capsule())
+            }
+        }
+        .padding(.horizontal)
+        .padding(.top, 8)
+    }
+
+    private func moveMonth(by value: Int) {
+        if let newMonth = Calendar.current.date(byAdding: .month, value: value, to: selectedMonth) {
+            selectedMonth = newMonth
+            startListening()
+        }
+    }
+
+    private func monthYearString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.dateFormat = "yyyy년 M월"
+        return formatter.string(from: date)
+    }
+
     // MARK: - Summary Card
 
     private var summaryCard: some View {
         VStack(spacing: 12) {
-            Text("이번 달 요약")
+            Text(showAllMonths ? "전체 요약" : "\(monthYearString(selectedMonth)) 요약")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -147,7 +210,7 @@ struct TransactionListView: View {
                     Text("수입")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("+\(formatAmount(monthlyIncome))")
+                    Text("+\(formatAmount(summaryIncome))")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.green)
                 }
@@ -159,7 +222,7 @@ struct TransactionListView: View {
                     Text("지출")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Text("-\(formatAmount(monthlyExpense))")
+                    Text("-\(formatAmount(summaryExpense))")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.red)
                 }
@@ -168,7 +231,7 @@ struct TransactionListView: View {
                 Divider().frame(height: 30)
 
                 VStack(spacing: 4) {
-                    let net = monthlyIncome - monthlyExpense
+                    let net = summaryIncome - summaryExpense
                     Text("순이익")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -202,6 +265,19 @@ struct TransactionListView: View {
                 }
             }
             .pickerStyle(.segmented)
+
+            HStack {
+                Text("정렬")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Picker("정렬", selection: $sortOption) {
+                    ForEach(SortOption.allCases, id: \.self) { option in
+                        Text(option.rawValue).tag(option)
+                    }
+                }
+                .pickerStyle(.menu)
+            }
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
@@ -230,7 +306,7 @@ struct TransactionListView: View {
 
     private var transactionList: some View {
         List {
-            ForEach(groupedByDate.keys.sorted(by: >), id: \.self) { dateKey in
+            ForEach(sortedDateKeys, id: \.self) { dateKey in
                 Section(header: sectionHeader(dateKey)) {
                     ForEach(groupedByDate[dateKey] ?? []) { dto in
                         TransactionRowView(dto: dto)
@@ -283,9 +359,26 @@ struct TransactionListView: View {
             grouped[key, default: []].append(dto)
         }
         for key in grouped.keys {
-            grouped[key]?.sort { $0.date.dateValue() > $1.date.dateValue() }
+            switch sortOption {
+            case .dateDesc, .dateAsc:
+                grouped[key]?.sort { $0.date.dateValue() > $1.date.dateValue() }
+            case .amountDesc:
+                grouped[key]?.sort { $0.amount > $1.amount }
+            case .amountAsc:
+                grouped[key]?.sort { $0.amount < $1.amount }
+            }
         }
         return grouped
+    }
+
+    private var sortedDateKeys: [String] {
+        let keys = groupedByDate.keys
+        switch sortOption {
+        case .dateDesc, .amountDesc, .amountAsc:
+            return keys.sorted(by: >)
+        case .dateAsc:
+            return keys.sorted(by: <)
+        }
     }
 
     private func formatSectionDate(_ yyyyMMdd: String) -> String {
@@ -295,8 +388,9 @@ struct TransactionListView: View {
         let cal = Calendar.current
         if cal.isDateInToday(date) { return "오늘" }
         if cal.isDateInYesterday(date) { return "어제" }
-        formatter.dateFormat = "M월 d일 (EEE)"
         formatter.locale = Locale(identifier: "ko_KR")
+        let isCurrentYear = cal.component(.year, from: date) == cal.component(.year, from: Date())
+        formatter.dateFormat = isCurrentYear ? "M월 d일 (EEE)" : "yyyy년 M월 d일 (EEE)"
         return formatter.string(from: date)
     }
 
@@ -310,8 +404,24 @@ struct TransactionListView: View {
     private func startListening() {
         listener?.remove()
         guard let coupleID = effectiveCoupleID else { return }
-        listener = FirebaseService.shared.listenToTransactions(coupleID: coupleID) { list in
-            transactions = list
+
+        if showAllMonths {
+            listener = FirebaseService.shared.listenToTransactions(coupleID: coupleID) { list in
+                transactions = list
+            }
+        } else {
+            let cal = Calendar.current
+            let comps = cal.dateComponents([.year, .month], from: selectedMonth)
+            guard let startOfMonth = cal.date(from: comps),
+                  let endOfMonth = cal.date(byAdding: DateComponents(month: 1, second: -1), to: startOfMonth) else { return }
+
+            listener = FirebaseService.shared.listenToTransactions(
+                coupleID: coupleID,
+                startDate: startOfMonth,
+                endDate: endOfMonth
+            ) { list in
+                transactions = list
+            }
         }
     }
 }
