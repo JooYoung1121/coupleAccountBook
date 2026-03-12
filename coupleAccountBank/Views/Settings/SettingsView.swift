@@ -38,7 +38,9 @@ struct SettingsView: View {
                 }
                 Section {
                     Button(role: .destructive) {
-                        try? authService.signOut()
+                        Task {
+                            try? await authService.signOut()
+                        }
                     } label: {
                         HStack {
                             Spacer()

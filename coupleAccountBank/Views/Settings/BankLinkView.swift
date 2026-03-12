@@ -1,5 +1,6 @@
 import SwiftUI
 import FirebaseAuth
+import UniformTypeIdentifiers
 
 /// 은행·카드 연동 및 내역 가져오기 화면
 struct BankLinkView: View {
@@ -8,6 +9,17 @@ struct BankLinkView: View {
     // 등록된 계좌/카드 목록
     @State private var linkedAccounts: [LinkedAccount] = []
     @State private var selectedAccount: LinkedAccount?
+
+    // 로그인 방식 선택
+    enum LoginMethod: String, CaseIterable {
+        case idPassword = "ID/비밀번호"
+        case certificate = "인증서"
+    }
+    @State private var loginMethod: LoginMethod = .idPassword
+    @State private var certFileBase64: String?
+    @State private var certPassword = ""
+    @State private var showCertFileImporter = false
+    @State private var selectedCertFileName: String?
 
     // 계정 연결 (샌드박스 기본값)
     @State private var createOrg = "0020"
@@ -90,7 +102,7 @@ struct BankLinkView: View {
                 } label: {
                     HStack(spacing: 12) {
                         Image(systemName: acct.isBank ? "building.columns.fill" : "creditcard.fill")
-                            .foregroundStyle(acct.isBank ? .blue : .purple)
+                            .foregroundStyle(acct.isBank ? Color.blue : Color.purple)
                             .frame(width: 28)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(acct.displayName)
@@ -146,6 +158,11 @@ struct BankLinkView: View {
 
     private var connectSection: some View {
         Section {
+            Picker("로그인 방식", selection: $loginMethod) {
+                ForEach(LoginMethod.allCases, id: \.self) { method in
+                    Text(method.rawValue).tag(method)
+                }
+            }
             Picker("기관", selection: $createOrg) {
                 ForEach(bankCodes + cardCodes, id: \.0) { code, name in
                     Text(name).tag(code)
@@ -155,15 +172,39 @@ struct BankLinkView: View {
                 Text("은행 (BK)").tag("BK")
                 Text("카드 (CD)").tag("CD")
             }
-            TextField("ID", text: $createId)
-                .textContentType(.username)
-                .autocorrectionDisabled()
-            SecureField("비밀번호", text: $createPassword)
-                .textContentType(.password)
-            if createBizType == "BK" {
-                TextField("계좌번호", text: $account).keyboardType(.numberPad)
-                TextField("계좌 비밀번호 (선택)", text: $accountPassword).keyboardType(.numberPad)
+
+            if loginMethod == .idPassword {
+                TextField("ID", text: $createId)
+                    .textContentType(.username)
+                    .autocorrectionDisabled()
+                SecureField("비밀번호", text: $createPassword)
+                    .textContentType(.password)
+                if createBizType == "BK" {
+                    TextField("계좌번호", text: $account).keyboardType(.numberPad)
+                    TextField("계좌 비밀번호 (선택)", text: $accountPassword).keyboardType(.numberPad)
+                }
+            } else {
+                Button {
+                    showCertFileImporter = true
+                } label: {
+                    HStack {
+                        Text(selectedCertFileName ?? "인증서 파일 선택 (.der)")
+                            .foregroundStyle(selectedCertFileName != nil ? Color.primary : Color.blue)
+                        Spacer()
+                        if selectedCertFileName != nil {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        }
+                    }
+                }
+                SecureField("인증서 비밀번호", text: $certPassword)
+                    .textContentType(.password)
+                if createBizType == "BK" {
+                    TextField("계좌번호", text: $account).keyboardType(.numberPad)
+                    TextField("계좌 비밀번호 (선택)", text: $accountPassword).keyboardType(.numberPad)
+                }
             }
+
             Button {
                 Task { await createConnectedId() }
             } label: {
@@ -173,11 +214,37 @@ struct BankLinkView: View {
                     if isLoading { ProgressView().scaleEffect(0.8) }
                 }
             }
-            .disabled(createId.isEmpty || createPassword.isEmpty || isLoading)
+            .disabled(isConnectButtonDisabled)
         } header: {
             Text("1. 계정 연결")
         } footer: {
             Text("은행·카드를 각각 연결해야 합니다. 같은 connectedId에 추가됩니다.")
+        }
+        .fileImporter(
+            isPresented: $showCertFileImporter,
+            allowedContentTypes: [.data],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                guard url.startAccessingSecurityScopedResource() else { return }
+                defer { url.stopAccessingSecurityScopedResource() }
+                if let data = try? Data(contentsOf: url) {
+                    certFileBase64 = data.base64EncodedString()
+                    selectedCertFileName = url.lastPathComponent
+                }
+            case .failure:
+                break
+            }
+        }
+    }
+
+    private var isConnectButtonDisabled: Bool {
+        if loginMethod == .idPassword {
+            return createId.isEmpty || createPassword.isEmpty || isLoading
+        } else {
+            return certFileBase64 == nil || certFileBase64?.isEmpty == true || certPassword.isEmpty || isLoading
         }
     }
 
@@ -273,6 +340,9 @@ struct BankLinkView: View {
         bankStart = s; bankEnd = e
         cardStart = s; cardEnd = e
         accountPassword = ""
+        certPassword = ""
+        certFileBase64 = nil
+        selectedCertFileName = nil
         message = "계정을 연결한 뒤, 내역을 가져오세요."
         messageType = .info
     }
@@ -333,13 +403,27 @@ struct BankLinkView: View {
         guard let uid = Auth.auth().currentUser?.uid else { return }
         isLoading = true; defer { isLoading = false }
         do {
-            let cid = try await CODEFService.shared.connectAccount(
-                organization: createOrg, businessType: createBizType,
-                id: createId, password: createPassword
-            )
+            let cid: String
+            if loginMethod == .certificate {
+                guard let base64 = certFileBase64, !base64.isEmpty, !certPassword.isEmpty else {
+                    message = "인증서 파일과 비밀번호를 입력하세요."
+                    messageType = .error
+                    return
+                }
+                cid = try await CODEFService.shared.connectAccountWithCertificate(
+                    organization: createOrg,
+                    businessType: createBizType,
+                    derFileBase64: base64,
+                    certPassword: certPassword
+                )
+            } else {
+                cid = try await CODEFService.shared.connectAccount(
+                    organization: createOrg, businessType: createBizType,
+                    id: createId, password: createPassword
+                )
+            }
             try await AuthService.shared.loadUserAfterConnect(connectedId: cid)
 
-            // LinkedAccount 자동 저장
             let linked = LinkedAccount(
                 connectedId: cid,
                 businessType: createBizType,
@@ -347,7 +431,7 @@ struct BankLinkView: View {
                 organizationName: orgName(for: createOrg),
                 accountNumber: createBizType == "BK" ? (account.isEmpty ? nil : account) : nil,
                 accountPassword: createBizType == "BK" ? (accountPassword.isEmpty ? nil : accountPassword) : nil,
-                loginId: createId
+                loginId: loginMethod == .certificate ? "인증서" : createId
             )
             try await FirebaseService.shared.saveLinkedAccount(uid: uid, account: linked)
             linkedAccounts.insert(linked, at: 0)

@@ -66,24 +66,35 @@ function encryptPassword(password, publicKeyBase64) {
   return encrypted.toString("base64");
 }
 
-// MARK: - 금융기관 계정 연결 (connectedId 발급)
+// MARK: - 금융기관 계정 연결 (connectedId 발급) — ID/PW 또는 인증서
 exports.createCodefAccount = onCall(
   { secrets: [CODEF_CLIENT_ID, CODEF_CLIENT_SECRET, CODEF_PUBLIC_KEY], invoker: "public" },
   async (request) => {
     if (!request.auth) throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
 
-    const { organization, businessType, loginType, id, password } = request.data;
-    if (!organization || !id || !password) {
-      throw new HttpsError("invalid-argument", "organization, id, password가 필요합니다.");
+    const { organization, businessType, loginType, id, password, derFile } = request.data;
+    const isCertificate = (loginType || "1") === "0";
+
+    if (!organization) {
+      throw new HttpsError("invalid-argument", "organization이 필요합니다.");
+    }
+    if (isCertificate) {
+      if (!derFile || typeof derFile !== "string") {
+        throw new HttpsError("invalid-argument", "인증서(derFile)가 필요합니다.");
+      }
+      if (!password || typeof password !== "string") {
+        throw new HttpsError("invalid-argument", "인증서 비밀번호가 필요합니다.");
+      }
+    } else {
+      if (!id || !password) {
+        throw new HttpsError("invalid-argument", "organization, id, password가 필요합니다.");
+      }
     }
 
-    // 비밀번호 RSA 암호화
     let encryptedPassword;
     try {
       const pubKey = CODEF_PUBLIC_KEY.value();
-      console.log("공개키 길이:", pubKey.length, "앞10자:", pubKey.slice(0, 10));
       encryptedPassword = encryptPassword(password, pubKey);
-      console.log("암호화 성공, 결과 길이:", encryptedPassword.length);
     } catch (err) {
       console.error("RSA 암호화 실패:", err.message);
       throw new HttpsError("internal", `RSA 암호화 실패: ${err.message}`);
@@ -97,22 +108,27 @@ exports.createCodefAccount = onCall(
       throw new HttpsError("internal", `토큰 발급 실패: ${err.message}`);
     }
 
+    const apiBase = getCodefApiBase();
+    const accountPayload = {
+      countryCode: "KR",
+      businessType: businessType ?? "BK",
+      clientType: "P",
+      organization,
+      loginType: isCertificate ? "0" : "1",
+      password: encryptedPassword,
+    };
+    if (isCertificate) {
+      accountPayload.derFile = derFile;
+      accountPayload.id = id || "";
+    } else {
+      accountPayload.id = id;
+    }
+
     let decoded;
     try {
-      const apiBase = getCodefApiBase();
       const response = await axios.post(
         `${apiBase}/v1/account/create`,
-        {
-          accountList: [{
-            countryCode: "KR",
-            businessType: businessType ?? "BK",
-            clientType: "P",
-            organization,
-            loginType: loginType ?? "1",  // "1": ID/PW, "0": 인증서(derFile 필수)
-            id,
-            password: encryptedPassword,
-          }],
-        },
+        { accountList: [accountPayload] },
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const raw = response.data;

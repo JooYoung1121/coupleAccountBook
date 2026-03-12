@@ -40,14 +40,8 @@ struct ContentView: View {
                     Label("설정", systemImage: "gearshape.fill")
                 }
         }
-        .onAppear {
-            let uid = authService.currentUser?.id
-            let coupleID = authService.currentUser?.effectiveCoupleID
-            let userName = authService.currentUser?.name
-            Task {
-                await FinanceSyncService.shared.performLaunchFetchIfNeeded(uid: uid, coupleID: coupleID, userName: userName)
-            }
-        }
+        // Fetch 전략 B: 진입 시 자동 fetch 없음. Firestore에 있는 이전 데이터만 표시.
+        // 새로고침은 설정 > 금융 연동에서 "가져오기" 버튼으로 수동 요청.
     }
 }
 

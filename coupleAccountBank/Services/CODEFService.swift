@@ -65,7 +65,38 @@ final class CODEFService {
         return connectedId
     }
 
-    /// Xcode 콘솔에 CODEF 풀 응답 출력 (파싱/상세 비교용)
+    /// 인증서로 금융기관 계정을 연결하고 connectedId를 발급받습니다.
+    /// - Parameters:
+    ///   - organization: 기관코드
+    ///   - businessType: "BK" 또는 "CD"
+    ///   - derFileBase64: 인증서 DER 파일의 Base64 문자열
+    ///   - certPassword: 인증서 비밀번호 (서버에서 RSA 암호화 후 CODEF로 전송)
+    func connectAccountWithCertificate(
+        organization: String,
+        businessType: String,
+        derFileBase64: String,
+        certPassword: String
+    ) async throws -> String {
+        let data: [String: Any] = [
+            "organization": organization,
+            "businessType": businessType,
+            "loginType": "0",
+            "id": "",
+            "password": certPassword,
+            "derFile": derFileBase64
+        ]
+        let result = try await functions
+            .httpsCallable("createCodefAccount")
+            .call(data)
+
+        Self.logFullResponse("createCodefAccount 응답(인증서)", result.data)
+
+        guard let dict = result.data as? [String: Any],
+              let connectedId = dict["connectedId"] as? String else {
+            throw CODEFError.invalidResponse
+        }
+        return connectedId
+    }
     private static func logFullResponse(_ label: String, _ value: Any?) {
         let prefix = "[CODEF]"
         guard let value = value else { print("\(prefix) \(label): nil"); return }

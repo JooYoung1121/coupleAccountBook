@@ -52,7 +52,12 @@ final class AuthService {
         await loadUser(uid: result.user.uid)
     }
 
-    func signOut() throws {
+    func signOut() async throws {
+        let uid = Auth.auth().currentUser?.uid
+        if let uid = uid {
+            let accounts = try? await FirebaseService.shared.fetchLinkedAccounts(uid: uid)
+            accounts?.forEach { KeychainService.shared.deleteAccountPassword(accountId: $0.id) }
+        }
         stopUserDocListener?()
         stopUserDocListener = nil
         try Auth.auth().signOut()

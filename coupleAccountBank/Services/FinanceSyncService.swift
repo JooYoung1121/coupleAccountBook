@@ -17,7 +17,16 @@ final class FinanceSyncService {
         guard let uid = uid, let coupleID = coupleID, !uid.isEmpty, !coupleID.isEmpty else { return }
         if didPerformLaunchFetchThisSession { return }
         didPerformLaunchFetchThisSession = true
+        await performFetch(uid: uid, coupleID: coupleID, userName: userName ?? "사용자")
+    }
 
+    /// 등록된 연동 계정 기준으로 최근 1개월 내역을 가져옵니다. 내역 탭 등에서 수동 호출용.
+    func performManualFetch(uid: String?, coupleID: String?, userName: String?) async {
+        guard let uid = uid, let coupleID = coupleID, !uid.isEmpty, !coupleID.isEmpty else { return }
+        await performFetch(uid: uid, coupleID: coupleID, userName: userName ?? "사용자")
+    }
+
+    private func performFetch(uid: String, coupleID: String, userName: String) async {
         let accounts: [LinkedAccount]
         do {
             accounts = try await FirebaseService.shared.fetchLinkedAccounts(uid: uid)
@@ -27,9 +36,6 @@ final class FinanceSyncService {
         if accounts.isEmpty { return }
 
         let (start, end) = defaultDateRange()
-        let ownerName = userName ?? "사용자"
-
-        // 순서: 은행 1개 먼저(전체 삭제 후 저장) → 카드들 추가(append)
         let bankAccounts = accounts.filter(\.isBank)
         let cardAccounts = accounts.filter(\.isCard)
 
@@ -48,11 +54,11 @@ final class FinanceSyncService {
                 _ = try await FirebaseService.shared.deleteAllImportedTransactions(coupleID: coupleID)
                 for item in list {
                     guard let tx = CODEFBankTransaction.from(dict: item) else { continue }
-                    let t = tx.toTransaction(ownerID: uid, ownerName: ownerName, coupleID: coupleID, accountNumber: accountNumber)
+                    let t = tx.toTransaction(ownerID: uid, ownerName: userName, coupleID: coupleID, accountNumber: accountNumber)
                     try? await FirebaseService.shared.saveTransaction(t)
                 }
             } catch {
-                // 자동 fetch 실패는 조용히 무시 (수동 가져오기로 보완)
+                // 은행 fetch 실패 시 다음 계속
             }
         }
 
@@ -66,7 +72,7 @@ final class FinanceSyncService {
                 )
                 for item in list {
                     guard let approval = CODEFCardApproval.from(dict: item) else { continue }
-                    let t = approval.toTransaction(ownerID: uid, ownerName: ownerName, coupleID: coupleID, cardOrg: acct.organization)
+                    let t = approval.toTransaction(ownerID: uid, ownerName: userName, coupleID: coupleID, cardOrg: acct.organization)
                     try? await FirebaseService.shared.saveTransaction(t)
                 }
             } catch {

@@ -37,6 +37,7 @@ struct TransactionListView: View {
     @State private var sortOption: SortOption = .dateDesc
     @State private var selectedMonth: Date = Date()
     @State private var showAllMonths = false
+    @State private var isFetchingFromLinked = false
 
     private var effectiveCoupleID: String? {
         authService.currentUser?.effectiveCoupleID
@@ -111,6 +112,17 @@ struct TransactionListView: View {
                 ToolbarItem(placement: .primaryAction) {
                     if effectiveCoupleID != nil {
                         HStack(spacing: 16) {
+                            Button {
+                                Task { await fetchFromLinkedAccounts() }
+                            } label: {
+                                if isFetchingFromLinked {
+                                    ProgressView().scaleEffect(0.8)
+                                } else {
+                                    Image(systemName: "arrow.clockwise")
+                                }
+                            }
+                            .disabled(isFetchingFromLinked)
+                            .help("등록된 계정으로 내역 가져오기")
                             Button {
                                 showAddSheet = true
                             } label: {
@@ -399,6 +411,16 @@ struct TransactionListView: View {
         formatter.numberStyle = .decimal
         formatter.maximumFractionDigits = 0
         return formatter.string(from: NSNumber(value: abs(value))) ?? "\(Int(value))"
+    }
+
+    private func fetchFromLinkedAccounts() async {
+        guard effectiveCoupleID != nil else { return }
+        isFetchingFromLinked = true
+        defer { isFetchingFromLinked = false }
+        let uid = authService.currentUser?.id
+        let coupleID = authService.currentUser?.effectiveCoupleID
+        let userName = authService.currentUser?.name
+        await FinanceSyncService.shared.performManualFetch(uid: uid, coupleID: coupleID, userName: userName)
     }
 
     private func startListening() {
