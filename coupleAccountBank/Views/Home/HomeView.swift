@@ -8,6 +8,42 @@ struct HomeView: View {
     @State private var displayedMonth: Date = Date()
     @State private var selectedDate: Date? = nil
     @State private var showAddSheet = false
+    @State private var linkedAccounts: [LinkedAccount] = []
+    @State private var partnerLinkedAccounts: [LinkedAccount] = []
+
+    // MARK: - Balance Computed Properties
+
+    private var partnerUID: String? {
+        guard let coupleID = authService.currentUser?.coupleID,
+              let myUID = authService.currentUser?.id else { return nil }
+        return coupleID.split(separator: "_").map(String.init).first { $0 != myUID }
+    }
+
+    private var hasPartner: Bool { partnerUID != nil }
+
+    private var bankBalance: Double? {
+        let myBalances = linkedAccounts.filter(\.isBank).compactMap(\.lastKnownBalance)
+        let partnerBalances = partnerLinkedAccounts.filter(\.isBank).compactMap(\.lastKnownBalance)
+        let all = myBalances + partnerBalances
+        guard !all.isEmpty else { return nil }
+        return all.reduce(0, +)
+    }
+
+    private var balanceUpdatedAt: Date? {
+        let all = (linkedAccounts + partnerLinkedAccounts).filter(\.isBank).compactMap(\.balanceUpdatedAt)
+        return all.max()
+    }
+
+    private var thisMonthExpense: Double {
+        transactionsForMonth(Date())
+            .filter { $0.type == TransactionType.expense.rawValue }
+            .reduce(0) { $0 + $1.amount }
+    }
+
+    private var netBalance: Double? {
+        guard let balance = bankBalance else { return nil }
+        return balance - thisMonthExpense
+    }
 
     private var effectiveCoupleID: String? {
         authService.currentUser?.effectiveCoupleID
@@ -20,6 +56,7 @@ struct HomeView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 12) {
+                    balanceSummaryCard
                     monthNavigation
                     calendarGrid
                     monthlySummary
@@ -34,12 +71,105 @@ struct HomeView: View {
             .sheet(isPresented: $showAddSheet) {
                 AddTransactionView(preselectedDate: selectedDate)
             }
-            .onAppear { startListening() }
+            .onAppear {
+                startListening()
+                Task { await loadLinkedAccounts() }
+            }
             .onDisappear {
                 listener?.remove()
                 listener = nil
             }
         }
+    }
+
+    // MARK: - Balance Summary Card
+
+    private var balanceSummaryCard: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 16)
+                .fill(LinearGradient(
+                    colors: [Color.blue, Color.blue.opacity(0.75)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ))
+
+            VStack(spacing: 0) {
+                // 상단: 레이블
+                Text(hasPartner ? "커플 합산 실질 잔액" : "실질 잔액")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.85))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, 6)
+
+                // 메인 금액
+                if let net = netBalance {
+                    Text(amountWithSign(net))
+                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .minimumScaleFactor(0.6)
+                        .lineLimit(1)
+                } else {
+                    Text("계좌를 연동하면 잔액이 표시됩니다")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.8))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                Divider()
+                    .background(.white.opacity(0.3))
+                    .padding(.vertical, 12)
+
+                // 하단: 은행 잔액 / 이달 지출
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("은행 잔액")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.7))
+                        Text(bankBalance.map { formatAmount($0) + "원" } ?? "-")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                    }
+
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text("이달 지출")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.7))
+                        Text("-\(formatAmount(thisMonthExpense))원")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                    }
+                }
+
+                // 갱신 시각
+                if let updatedAt = balanceUpdatedAt {
+                    Text("은행 잔액 기준: \(relativeTime(updatedAt))")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.55))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 8)
+                }
+            }
+            .padding(18)
+        }
+    }
+
+    private func amountWithSign(_ value: Double) -> String {
+        let sign = value < 0 ? "-" : ""
+        return "\(sign)\(formatAmount(abs(value)))원"
+    }
+
+    private func relativeTime(_ date: Date) -> String {
+        let diff = Date().timeIntervalSince(date)
+        if diff < 60 { return "방금 기준" }
+        if diff < 3600 { return "\(Int(diff / 60))분 전 기준" }
+        if diff < 86400 { return "\(Int(diff / 3600))시간 전 기준" }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ko_KR")
+        f.dateFormat = "M월 d일 기준"
+        return f.string(from: date)
     }
 
     // MARK: - Month Navigation
@@ -352,6 +482,17 @@ struct HomeView: View {
     }
 
     // MARK: - Listener
+
+    private func loadLinkedAccounts() async {
+        guard let uid = authService.currentUser?.id else { return }
+        async let mine = FirebaseService.shared.fetchLinkedAccounts(uid: uid)
+        linkedAccounts = (try? await mine) ?? []
+
+        if let partnerUID {
+            async let partner = FirebaseService.shared.fetchLinkedAccounts(uid: partnerUID)
+            partnerLinkedAccounts = (try? await partner) ?? []
+        }
+    }
 
     private func startListening() {
         listener?.remove()

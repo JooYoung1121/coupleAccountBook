@@ -35,6 +35,16 @@ struct ContentView: View {
                     Label("목표", systemImage: "target")
                 }
 
+            BudgetView()
+                .tabItem {
+                    Label("예산", systemImage: "chart.bar.fill")
+                }
+
+            AnalysisView()
+                .tabItem {
+                    Label("분석", systemImage: "waveform.path.ecg")
+                }
+
             SettingsView()
                 .tabItem {
                     Label("설정", systemImage: "gearshape.fill")

@@ -98,9 +98,11 @@ final class FirebaseService {
         try await coupleTransactions(coupleID).document(id).delete()
     }
 
-    /// 해당 커플 방의 모든 자동 수집 거래를 삭제합니다 (재가져오기 전 정리용)
+    /// 해당 커플 방의 자동 수집(isImported=true) 거래만 삭제합니다 (재가져오기 전 정리용)
     func deleteAllImportedTransactions(coupleID: String) async throws -> Int {
-        let snapshot = try await coupleTransactions(coupleID).getDocuments()
+        let snapshot = try await coupleTransactions(coupleID)
+            .whereField("isImported", isEqualTo: true)
+            .getDocuments()
         var count = 0
         for doc in snapshot.documents {
             try await doc.reference.delete()
@@ -155,6 +157,55 @@ final class FirebaseService {
         try await coupleGoals(coupleID).document(id).updateData([
             "currentAmount": currentAmount
         ])
+    }
+
+    func deleteGoal(id: String, coupleID: String) async throws {
+        try await coupleGoals(coupleID).document(id).delete()
+    }
+
+    func updateGoalStatus(id: String, coupleID: String, status: GoalStatus) async throws {
+        try await coupleGoals(coupleID).document(id).updateData([
+            "status": status.rawValue
+        ])
+    }
+
+    // MARK: - Budget
+
+    func saveBudget(_ budget: Budget) async throws {
+        let data: [String: Any] = [
+            "id": budget.id,
+            "month": budget.month,
+            "category": budget.category,
+            "budgetAmount": budget.budgetAmount,
+            "coupleID": budget.coupleID,
+            "createdAt": Timestamp(date: budget.createdAt)
+        ]
+        try await coupleBudgets(budget.coupleID).document(budget.id).setData(data)
+    }
+
+    func listenToBudgets(
+        coupleID: String,
+        onChange: @escaping ([Budget]) -> Void
+    ) -> ListenerRegistration {
+        coupleBudgets(coupleID)
+            .addSnapshotListener { snapshot, _ in
+                guard let docs = snapshot?.documents else { return }
+                let budgets = docs.compactMap { doc -> Budget? in
+                    let d = doc.data()
+                    guard let id = d["id"] as? String,
+                          let month = d["month"] as? String,
+                          let category = d["category"] as? String,
+                          let budgetAmount = d["budgetAmount"] as? Double,
+                          let coupleID = d["coupleID"] as? String else { return nil }
+                    return Budget(id: id, month: month, category: category,
+                                  budgetAmount: budgetAmount, coupleID: coupleID)
+                }
+                onChange(budgets)
+            }
+    }
+
+    func deleteBudget(id: String, coupleID: String) async throws {
+        try await coupleBudgets(coupleID).document(id).delete()
     }
 
     func listenToGoals(
@@ -277,6 +328,8 @@ final class FirebaseService {
                   let organization = d["organization"] as? String,
                   let organizationName = d["organizationName"] as? String else { return nil }
             let linkedAt = (d["linkedAt"] as? Timestamp)?.dateValue() ?? Date()
+            let lastKnownBalance = d["lastKnownBalance"] as? Double
+            let balanceUpdatedAt = (d["balanceUpdatedAt"] as? Timestamp)?.dateValue()
             let acct = LinkedAccount(
                 id: id,
                 connectedId: connectedId,
@@ -286,10 +339,23 @@ final class FirebaseService {
                 accountNumber: d["accountNumber"] as? String,
                 accountPassword: KeychainService.shared.loadAccountPassword(accountId: id),
                 loginId: d["loginId"] as? String,
-                linkedAt: linkedAt
+                linkedAt: linkedAt,
+                lastKnownBalance: lastKnownBalance,
+                balanceUpdatedAt: balanceUpdatedAt
             )
             return acct
         }
+    }
+
+    func updateLinkedAccountBalance(uid: String, accountId: String, balance: Double) async throws {
+        try await db.collection(User.collectionName)
+            .document(uid)
+            .collection("linkedAccounts")
+            .document(accountId)
+            .updateData([
+                "lastKnownBalance": balance,
+                "balanceUpdatedAt": Timestamp(date: Date())
+            ])
     }
 
     func deleteLinkedAccount(uid: String, accountId: String) async throws {
@@ -346,6 +412,10 @@ final class FirebaseService {
 
     private func coupleGoals(_ coupleID: String) -> CollectionReference {
         db.collection("couples").document(coupleID).collection("goals")
+    }
+
+    private func coupleBudgets(_ coupleID: String) -> CollectionReference {
+        db.collection("couples").document(coupleID).collection("budgets")
     }
 
     // MARK: - Errors

@@ -108,9 +108,20 @@ struct BankLinkView: View {
                             Text(acct.displayName)
                                 .font(.body)
                                 .foregroundStyle(.primary)
-                            Text(acct.isBank ? "은행" : "카드")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            if acct.isBank, let balance = acct.lastKnownBalance {
+                                Text("잔액 \(formatBalance(balance))원")
+                                    .font(.caption)
+                                    .foregroundStyle(.blue)
+                                if let updatedAt = acct.balanceUpdatedAt {
+                                    Text(relativeTime(updatedAt) + " 기준")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            } else {
+                                Text(acct.isBank ? "은행" : "카드")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         Spacer()
                         if selectedAccount?.id == acct.id {
@@ -483,6 +494,24 @@ struct BankLinkView: View {
             message = "은행 가져오기 실패: \(error.localizedDescription)"
             messageType = .error
         }
+    }
+
+    private func formatBalance(_ value: Double) -> String {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.maximumFractionDigits = 0
+        return f.string(from: NSNumber(value: value)) ?? "\(Int(value))"
+    }
+
+    private func relativeTime(_ date: Date) -> String {
+        let diff = Date().timeIntervalSince(date)
+        if diff < 60 { return "방금" }
+        if diff < 3600 { return "\(Int(diff / 60))분 전" }
+        if diff < 86400 { return "\(Int(diff / 3600))시간 전" }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ko_KR")
+        f.dateFormat = "M월 d일"
+        return f.string(from: date)
     }
 
     private func fetchCard() async {

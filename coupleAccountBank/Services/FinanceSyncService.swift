@@ -52,6 +52,17 @@ final class FinanceSyncService {
                     connectedIdOverride: firstBank.connectedId
                 )
                 _ = try await FirebaseService.shared.deleteAllImportedTransactions(coupleID: coupleID)
+
+                // 가장 최근 거래(index 0)의 resAfterTranBalance를 잔액으로 저장
+                if let firstItem = list.first,
+                   let tx = CODEFBankTransaction.from(dict: firstItem),
+                   let balanceStr = tx.resAfterTranBalance,
+                   let balance = Double(balanceStr), balance > 0 {
+                    try? await FirebaseService.shared.updateLinkedAccountBalance(
+                        uid: uid, accountId: firstBank.id, balance: balance
+                    )
+                }
+
                 for item in list {
                     guard let tx = CODEFBankTransaction.from(dict: item) else { continue }
                     let t = tx.toTransaction(ownerID: uid, ownerName: userName, coupleID: coupleID, accountNumber: accountNumber)

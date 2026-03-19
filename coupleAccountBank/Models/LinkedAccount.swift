@@ -12,6 +12,8 @@ struct LinkedAccount: Codable, Identifiable {
     var accountPassword: String? // 계좌 비밀번호 (은행만)
     var loginId: String?         // 인터넷뱅킹 ID (재연결용)
     var linkedAt: Date
+    var lastKnownBalance: Double?   // 최근 거래 후 잔액 (은행만, 거래내역 기반)
+    var balanceUpdatedAt: Date?     // 잔액 마지막 갱신 시각
 
     init(
         id: String = UUID().uuidString,
@@ -22,7 +24,9 @@ struct LinkedAccount: Codable, Identifiable {
         accountNumber: String? = nil,
         accountPassword: String? = nil,
         loginId: String? = nil,
-        linkedAt: Date = .now
+        linkedAt: Date = .now,
+        lastKnownBalance: Double? = nil,
+        balanceUpdatedAt: Date? = nil
     ) {
         self.id = id
         self.connectedId = connectedId
@@ -33,6 +37,8 @@ struct LinkedAccount: Codable, Identifiable {
         self.accountPassword = accountPassword
         self.loginId = loginId
         self.linkedAt = linkedAt
+        self.lastKnownBalance = lastKnownBalance
+        self.balanceUpdatedAt = balanceUpdatedAt
     }
 
     var isBank: Bool { businessType == "BK" }
